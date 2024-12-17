@@ -66,7 +66,7 @@ public class Options implements Serializable {
 
     private static final Logger logger = LogManager.getLogger(Options.class);
 
-    private static final String OPTIONS_FILE = "options.yml";
+    public static final String OPTIONS_FILE = "options.yml";
 
     private static final String DEFAULT_OUTPUT_DIR = "output";
 
@@ -74,7 +74,7 @@ public class Options implements Serializable {
     @JsonProperty
     @Option(names = "--options-file",
             description = "The options file")
-    private File optionsFile;
+    public File optionsFile;
 
     // ---------- information options ----------
     @JsonProperty
@@ -361,7 +361,7 @@ public class Options implements Serializable {
     /**
      * Writes options to given file.
      */
-    private static void writeOptions(Options options, File output) {
+    public static void writeOptions(Options options, File output) {
         ObjectMapper mapper = new ObjectMapper(
                 new YAMLFactory()
                         .disable(YAMLGenerator.Feature.WRITE_DOC_START_MARKER)
