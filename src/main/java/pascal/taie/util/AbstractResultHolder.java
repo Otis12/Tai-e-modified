@@ -22,6 +22,7 @@
 
 package pascal.taie.util;
 
+import pascal.taie.World;
 import pascal.taie.util.collection.Maps;
 
 import java.util.Collection;
@@ -50,6 +51,9 @@ public abstract class AbstractResultHolder implements ResultHolder {
 
     @Override
     public <R> R getResult(String key) {
+        if (!results.containsKey(key)) {
+            World.get().runAnalysis(key);
+        }
         return (R) results.get(key);
     }
 

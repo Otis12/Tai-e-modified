@@ -67,7 +67,7 @@ public class ConfigManager {
      * @throws ConfigException when the manager does not contain
      *                         the AnalysisConfig for the given id.
      */
-    AnalysisConfig getConfig(String id) {
+    public AnalysisConfig getConfig(String id) {
         AnalysisConfig config = configs.get(id);
         if (config == null) {
             throw new ConfigException("Analysis \"" + id + "\" is not found in " +

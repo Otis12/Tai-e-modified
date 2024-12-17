@@ -22,6 +22,10 @@
 
 package pascal.taie;
 
+import pascal.taie.analysis.Analysis;
+import pascal.taie.analysis.ProgramAnalysis;
+import pascal.taie.config.AnalysisConfig;
+import pascal.taie.config.ConfigException;
 import pascal.taie.config.Options;
 import pascal.taie.frontend.cache.CachedIRBuilder;
 import pascal.taie.ir.IRBuilder;
@@ -30,16 +34,17 @@ import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.natives.NativeModel;
 import pascal.taie.language.type.TypeSystem;
 import pascal.taie.util.AbstractResultHolder;
+import pascal.taie.util.AnalysisException;
 
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.io.Serial;
-import java.io.Serializable;
+import java.io.*;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Manages the whole-program information of the program being analyzed.
@@ -90,6 +95,46 @@ public final class World extends AbstractResultHolder
      */
     public static void set(World world) {
         theWorld = world;
+    }
+
+    public void runAnalysis(String analysisID) {
+        InputStream tai_e_content = Main.class.getClassLoader().getResourceAsStream("tai-e-analyses.yml");
+        List<AnalysisConfig> taie_AnalysisConfigs = AnalysisConfig.parseConfigs(tai_e_content);
+        Map<String, AnalysisConfig> defaultConfigMap = taie_AnalysisConfigs.stream()
+                .collect(Collectors.toMap(AnalysisConfig::getId, config -> config));
+        AnalysisConfig config = defaultConfigMap.get(analysisID);
+
+        if (config == null) {
+            return;
+        }
+
+        Analysis analysis;
+        // Create analysis instance
+        try {
+            Class<?> clazz = Class.forName(config.getAnalysisClass());
+            Constructor<?> ctor = clazz.getConstructor(AnalysisConfig.class);
+            analysis = (Analysis) ctor.newInstance(config);
+        } catch (ClassNotFoundException e) {
+            throw new AnalysisException("Analysis class " +
+                    config.getAnalysisClass() + " is not found", e);
+        } catch (NoSuchMethodException | IllegalAccessException e) {
+            throw new AnalysisException("Failed to get constructor " +
+                    config.getAnalysisClass() + "(AnalysisConfig), " +
+                    "thus the analysis cannot be executed by Tai-e", e);
+        } catch (InstantiationException | InvocationTargetException e) {
+            throw new AnalysisException("Failed to initialize " +
+                    config.getAnalysisClass(), e);
+        } catch (ClassCastException e) {
+            throw new ConfigException(
+                    config.getAnalysisClass() + " is not an analysis class");
+        }
+
+        if (analysis instanceof ProgramAnalysis<?> pa) {
+            Object result = pa.analyze();
+            if (result != null) {
+                storeResult(config.getId(), result);
+            }
+        }
     }
 
     /**
