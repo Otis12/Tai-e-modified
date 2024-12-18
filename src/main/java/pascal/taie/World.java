@@ -23,6 +23,7 @@
 package pascal.taie;
 
 import pascal.taie.analysis.Analysis;
+import pascal.taie.analysis.ClassAnalysis;
 import pascal.taie.analysis.ProgramAnalysis;
 import pascal.taie.config.AnalysisConfig;
 import pascal.taie.config.ConfigException;
@@ -134,6 +135,17 @@ public final class World extends AbstractResultHolder
             if (result != null) {
                 storeResult(config.getId(), result);
             }
+        } else if (analysis instanceof ClassAnalysis<?> ca) {
+            World.get()
+                    .getClassHierarchy()
+                    .applicationClasses()
+                    .toList().parallelStream()
+                    .forEach(c -> {
+                        Object result = ca.analyze(c);
+                        if (result != null) {
+                            c.storeResult(analysis.getId(), result);
+                        }
+                    });
         }
     }
 
