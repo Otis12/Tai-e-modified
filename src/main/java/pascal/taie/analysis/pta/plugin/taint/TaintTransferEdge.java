@@ -25,11 +25,11 @@ package pascal.taie.analysis.pta.plugin.taint;
 import pascal.taie.analysis.pta.core.cs.element.Pointer;
 import pascal.taie.analysis.pta.core.solver.OtherEdge;
 
-class TaintTransferEdge extends OtherEdge {
+public class TaintTransferEdge extends OtherEdge {
 
     private final TaintTransfer transfer;
 
-    TaintTransferEdge(Pointer source, Pointer target, TaintTransfer transfer) {
+    public TaintTransferEdge(Pointer source, Pointer target, TaintTransfer transfer) {
         super(source, target);
         this.transfer = transfer;
     }

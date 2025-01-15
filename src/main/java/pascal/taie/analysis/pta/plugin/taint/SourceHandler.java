@@ -47,47 +47,47 @@ import java.util.Set;
 /**
  * Handles sources in taint analysis.
  */
-class SourceHandler extends OnFlyHandler {
+public class SourceHandler extends OnFlyHandler {
 
     /**
      * Map from a source method to its result sources.
      */
-    private final MultiMap<JMethod, CallSource> callSources = Maps.newMultiMap();
+    public final MultiMap<JMethod, CallSource> callSources = Maps.newMultiMap();
 
     /**
      * Map from a method to {@link Invoke} statements in the method
      * which matches any call source.
      * This map matters only when call-site mode is enabled.
      */
-    private final MultiMap<JMethod, Invoke> callSiteSources = Maps.newMultiMap();
+    public final MultiMap<JMethod, Invoke> callSiteSources = Maps.newMultiMap();
 
     /**
      * Map from a source method to its parameter sources.
      */
-    private final MultiMap<JMethod, ParamSource> paramSources = Maps.newMultiMap();
+    public final MultiMap<JMethod, ParamSource> paramSources = Maps.newMultiMap();
 
-    private record SourceInfo(IndexRef indexRef, Obj taint) {
+    public record SourceInfo(IndexRef indexRef, Obj taint) {
     }
 
-    private final MultiMap<Var, SourceInfo> sourceInfos = Maps.newMultiMap();
+    public final MultiMap<Var, SourceInfo> sourceInfos = Maps.newMultiMap();
 
     /**
      * Whether this handler needs to handle field sources.
      */
-    private final boolean handleFieldSources;
+    public final boolean handleFieldSources;
 
     /**
      * Map from a source field to its field source.
      */
-    private final Map<JField, FieldSource> fieldSources = Maps.newMap();
+    public final Map<JField, FieldSource> fieldSources = Maps.newMap();
 
     /**
      * Maps from a method to {@link LoadField} statements in the method
      * which loads a source field.
      */
-    private final MultiMap<JMethod, LoadField> loadedFieldSources = Maps.newMultiMap();
+    public final MultiMap<JMethod, LoadField> loadedFieldSources = Maps.newMultiMap();
 
-    SourceHandler(HandlerContext context) {
+    public SourceHandler(HandlerContext context) {
         super(context);
         context.config().sources().forEach(src -> {
             if (src instanceof CallSource callSrc) {
@@ -121,7 +121,7 @@ class SourceHandler extends OnFlyHandler {
     /**
      * Generates taint objects from call sources.
      */
-    private void processCallSource(Context context, Invoke callSite, CallSource source) {
+    public void processCallSource(Context context, Invoke callSite, CallSource source) {
         IndexRef indexRef = source.indexRef();
         int index = indexRef.index();
         if (InvokeUtils.RESULT == index && callSite.getLValue() == null) {
@@ -141,7 +141,7 @@ class SourceHandler extends OnFlyHandler {
         }
     }
 
-    private void addArrayFieldTaint(PointsToSet baseObjs, SourceInfo info) {
+    public void addArrayFieldTaint(PointsToSet baseObjs, SourceInfo info) {
         IndexRef indexRef = info.indexRef();
         Obj taint = info.taint();
         switch (indexRef.kind()) {
@@ -199,7 +199,7 @@ class SourceHandler extends OnFlyHandler {
         }
     }
 
-    private void handleParamSource(CSMethod csMethod) {
+    public void handleParamSource(CSMethod csMethod) {
         JMethod method = csMethod.getMethod();
         if (paramSources.containsKey(method)) {
             Context context = csMethod.getContext();
@@ -222,7 +222,7 @@ class SourceHandler extends OnFlyHandler {
      * If given method contains pre-recorded {@link LoadField} statements,
      * adds corresponding taint object to LHS of the {@link LoadField}.
      */
-    private void handleFieldSource(CSMethod csMethod) {
+    public void handleFieldSource(CSMethod csMethod) {
         JMethod method = csMethod.getMethod();
         Set<LoadField> loads = loadedFieldSources.get(method);
         if (!loads.isEmpty()) {
@@ -242,7 +242,7 @@ class SourceHandler extends OnFlyHandler {
      * If given method contains pre-recorded {@link Invoke} statements,
      * call {@link #processCallSource} to generate taint objects.
      */
-    private void handleCallSource(CSMethod csMethod) {
+    public void handleCallSource(CSMethod csMethod) {
         JMethod method = csMethod.getMethod();
         Set<Invoke> callSites = callSiteSources.get(method);
         if (!callSites.isEmpty()) {

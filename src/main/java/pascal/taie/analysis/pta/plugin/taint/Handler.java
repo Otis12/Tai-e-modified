@@ -28,7 +28,7 @@ import pascal.taie.analysis.pta.core.solver.Solver;
 /**
  * Abstract class for taint analysis handlers.
  */
-abstract class Handler {
+ public abstract class Handler {
 
     protected final Solver solver;
 

@@ -45,23 +45,23 @@ import java.util.Set;
  */
 public class JMethod extends ClassMember {
 
-    private final List<Type> paramTypes;
+    public final List<Type> paramTypes;
 
-    private final Type returnType;
+    public final Type returnType;
 
-    private final List<ClassType> exceptions;
+    public final List<ClassType> exceptions;
 
-    private final Subsignature subsignature;
+    public final Subsignature subsignature;
 
     @Nullable
     @Experimental
-    private final MethodGSignature gSignature;
+    public final MethodGSignature gSignature;
 
     @Nullable
-    private final List<AnnotationHolder> paramAnnotations;
+    public final List<AnnotationHolder> paramAnnotations;
 
     @Nullable
-    private final List<String> paramNames;
+    public final List<String> paramNames;
 
     /**
      * Source of the body (and/or other information) of this method.
@@ -69,14 +69,14 @@ public class JMethod extends ClassMember {
      * <br>
      * Notes: This field is {@code transient} because it is not serializable.
      */
-    private final transient Object methodSource;
+    public final transient Object methodSource;
 
     /**
      * Notes: This field is {@code transient} because it is serialized separately.
      *
      * @see pascal.taie.frontend.cache.CachedIRBuilder
      */
-    private transient IR ir;
+    public transient IR ir;
 
     public JMethod(JClass declaringClass, String name, Set<Modifier> modifiers,
                    List<Type> paramTypes, Type returnType, List<ClassType> exceptions,

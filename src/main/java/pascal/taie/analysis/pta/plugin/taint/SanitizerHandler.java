@@ -39,16 +39,16 @@ import static pascal.taie.analysis.pta.plugin.util.InvokeUtils.BASE;
 /**
  * Handles sanitizers in taint analysis.
  */
-class SanitizerHandler extends OnFlyHandler {
+public class SanitizerHandler extends OnFlyHandler {
 
-    private final MultiMap<JMethod, ParamSanitizer> paramSanitizers = Maps.newMultiMap();
+    public final MultiMap<JMethod, ParamSanitizer> paramSanitizers = Maps.newMultiMap();
 
     /**
      * Used to filter out taint objects from points-to set.
      */
-    private final Predicate<CSObj> taintFilter;
+    public final Predicate<CSObj> taintFilter;
 
-    SanitizerHandler(HandlerContext context) {
+    public SanitizerHandler(HandlerContext context) {
         super(context);
         taintFilter = o -> !context.manager().isTaint(o.getObject());
         context.config().paramSanitizers()
@@ -73,7 +73,7 @@ class SanitizerHandler extends OnFlyHandler {
         }
     }
 
-    private static Var getParam(IR ir, int index) {
+    public static Var getParam(IR ir, int index) {
         return switch (index) {
             case BASE -> ir.getThis();
             default -> ir.getParam(index);

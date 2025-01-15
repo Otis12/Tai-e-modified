@@ -30,7 +30,7 @@ import javax.annotation.Nullable;
 public record IndexRef(Kind kind, int index, @Nullable JField field)
         implements Comparable<IndexRef> {
 
-    static final String ARRAY_SUFFIX = "[*]";
+    public static final String ARRAY_SUFFIX = "[*]";
 
     public enum Kind {
         VAR, ARRAY, FIELD

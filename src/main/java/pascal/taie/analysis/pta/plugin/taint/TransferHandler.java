@@ -59,60 +59,60 @@ import java.util.Set;
 /**
  * Handles taint transfers in taint analysis.
  */
-class TransferHandler extends OnFlyHandler {
+public class TransferHandler extends OnFlyHandler {
 
-    private static final Logger logger = LogManager.getLogger(TransferHandler.class);
+    public static final Logger logger = LogManager.getLogger(TransferHandler.class);
 
-    private final Context emptyContext;
+    public final Context emptyContext;
 
     /**
      * Map from method (which causes taint transfer) to set of relevant
      * {@link TaintTransfer}.
      */
-    private final MultiMap<JMethod, TaintTransfer> transfers = Maps.newMultiMap();
+    public final MultiMap<JMethod, TaintTransfer> transfers = Maps.newMultiMap();
 
-    private final Map<Type, Transfer> transferFunctions = Maps.newHybridMap();
+    public final Map<Type, Transfer> transferFunctions = Maps.newHybridMap();
 
-    private enum Kind {
+    public enum Kind {
         VAR_TO_ARRAY, VAR_TO_FIELD, ARRAY_TO_VAR, FIELD_TO_VAR
     }
 
-    private record TransferInfo(Kind kind, Var var, TaintTransfer transfer) {
+    public record TransferInfo(Kind kind, Var var, TaintTransfer transfer) {
     }
 
-    private final MultiMap<Var, TransferInfo> transferInfos = Maps.newMultiMap();
+    public final MultiMap<Var, TransferInfo> transferInfos = Maps.newMultiMap();
 
     /**
      * Map from a method to {@link Invoke} statements in the method
      * which matches any transfer method.
      * This map matters only when call-site mode is enabled.
      */
-    private final MultiMap<JMethod, Invoke> callSiteTransfers = Maps.newMultiMap();
+    public final MultiMap<JMethod, Invoke> callSiteTransfers = Maps.newMultiMap();
 
     /**
      * Whether enable taint back propagation to handle aliases about
      * tainted mutable objects, e.g., char[].
      */
-    private final boolean enableBackPropagate = true;
+    public final boolean enableBackPropagate = true;
 
     /**
      * Cache statements generated for back propagation.
      */
-    private final Map<Var, List<Stmt>> backPropStmts = Maps.newMap();
+    public final Map<Var, List<Stmt>> backPropStmts = Maps.newMap();
 
     /**
      * Counter for generating temporary variables.
      */
-    private int counter = 0;
+    public int counter = 0;
 
-    TransferHandler(HandlerContext context) {
+    public TransferHandler(HandlerContext context) {
         super(context);
         emptyContext = solver.getContextSelector().getEmptyContext();
         context.config().transfers()
                 .forEach(t -> this.transfers.put(t.method(), t));
     }
 
-    private void processTransfer(Context context, Invoke callSite, TaintTransfer transfer) {
+    public void processTransfer(Context context, Invoke callSite, TaintTransfer transfer) {
         IndexRef from = transfer.from();
         IndexRef to = transfer.to();
         Var toVar = InvokeUtils.getVar(callSite, to.index());
@@ -169,7 +169,7 @@ class TransferHandler extends OnFlyHandler {
         }
     }
 
-    private void transferTaint(PointsToSet baseObjs, Context ctx, TransferInfo info) {
+    public void transferTaint(PointsToSet baseObjs, Context ctx, TransferInfo info) {
         CSVar csVar = csManager.getCSVar(ctx, info.var());
         Transfer tf = getTransferFunction(info.transfer().type());
         switch (info.kind()) {
@@ -210,7 +210,7 @@ class TransferHandler extends OnFlyHandler {
         }
     }
 
-    private Transfer getTransferFunction(Type toType) {
+    public Transfer getTransferFunction(Type toType) {
         return transferFunctions.computeIfAbsent(toType,
                 type -> ((edge, input) -> {
                     PointsToSet newTaints = solver.makePointsToSet();
@@ -225,13 +225,13 @@ class TransferHandler extends OnFlyHandler {
                 }));
     }
 
-    private void backPropagateTaint(Var to, Context ctx) {
+    public void backPropagateTaint(Var to, Context ctx) {
         CSMethod csMethod = csManager.getCSMethod(ctx, to.getMethod());
         solver.addStmts(csMethod,
                 backPropStmts.computeIfAbsent(to, this::getBackPropagateStmts));
     }
 
-    private List<Stmt> getBackPropagateStmts(Var var) {
+    public List<Stmt> getBackPropagateStmts(Var var) {
         // Currently, we handle one case, i.e., var = base.field where
         // var is tainted, and we back propagate taint from var to base.field.
         // For simplicity, we add artificial statement like base.field = var
@@ -269,7 +269,7 @@ class TransferHandler extends OnFlyHandler {
         return stmts.isEmpty() ? List.of() : stmts;
     }
 
-    private Var getTempVar(JMethod container, Type type) {
+    public Var getTempVar(JMethod container, Type type) {
         String varName = "%taint-temp-" + counter++;
         return new Var(container, varName, type, -1);
     }

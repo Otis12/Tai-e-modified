@@ -83,7 +83,7 @@ public class TaintManager {
     /**
      * @return all taint objects generated via this manager.
      */
-    Set<Obj> getTaintObjs() {
+    public Set<Obj> getTaintObjs() {
         return Collections.unmodifiableSet(taintObjs);
     }
 }
