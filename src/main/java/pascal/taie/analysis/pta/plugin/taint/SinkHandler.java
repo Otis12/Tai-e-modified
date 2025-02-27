@@ -52,12 +52,12 @@ import java.util.stream.Collectors;
 /**
  * Handles sinks in taint analysis.
  */
-class SinkHandler extends Handler {
+public class SinkHandler extends Handler {
 
     private final List<Sink> sinks;
     private final List<Pair<Object,Object>> phantomSinks;
 
-    SinkHandler(HandlerContext context) {
+    public SinkHandler(HandlerContext context) {
         super(context);
         sinks = context.config().sinks();
         phantomSinks = context.config().phantomSinks();
@@ -118,7 +118,7 @@ class SinkHandler extends Handler {
         return taintFlows;
     }
 
-    Set<TaintFlow> collectTaintFlows() {
+    public Set<TaintFlow> collectTaintFlows() {
         PointerAnalysisResult result = solver.getResult();
         Set<TaintFlow> taintFlows = Sets.newOrderedSet();
         for (Sink sink : sinks) {
