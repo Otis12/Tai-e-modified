@@ -22,6 +22,7 @@
 
 package pascal.taie.analysis.pta.plugin.taint;
 
+import pascal.taie.World;
 import pascal.taie.analysis.graph.callgraph.CallKind;
 import pascal.taie.analysis.graph.callgraph.Edge;
 import pascal.taie.analysis.pta.PointerAnalysisResult;
@@ -31,13 +32,19 @@ import pascal.taie.analysis.pta.core.cs.element.InstanceField;
 import pascal.taie.analysis.pta.core.cs.element.Pointer;
 import pascal.taie.analysis.pta.core.heap.Obj;
 import pascal.taie.analysis.pta.plugin.util.InvokeUtils;
+import pascal.taie.ir.IR;
+import pascal.taie.ir.exp.InvokeDynamic;
 import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.stmt.Invoke;
+import pascal.taie.ir.stmt.Stmt;
+import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.util.collection.MultiMap;
 import pascal.taie.util.collection.MultiMapCollector;
+import pascal.taie.util.collection.Pair;
 import pascal.taie.util.collection.Sets;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -48,10 +55,67 @@ import java.util.stream.Collectors;
 class SinkHandler extends Handler {
 
     private final List<Sink> sinks;
+    private final List<Pair<Object,Object>> phantomSinks;
 
     SinkHandler(HandlerContext context) {
         super(context);
         sinks = context.config().sinks();
+        phantomSinks = context.config().phantomSinks();
+    }
+
+
+    public Set<TaintFlow> addTaintFlow(){
+        Set<TaintFlow> taintFlows = new HashSet<>();
+        PointerAnalysisResult result = solver.getResult();
+        List<JClass> classList = World.get().getClassHierarchy().applicationClasses().toList();
+        for(JClass jClass: classList){
+            if(jClass.isPhantom()){
+                continue;
+            }
+            for(JMethod jMethod: jClass.getDeclaredMethods()){
+                if(jMethod.isAbstract()){
+                    continue;
+                }
+                IR methodIR = jMethod.getIR();
+                List<Stmt> stmts = methodIR.getStmts();
+                stmts.parallelStream().forEach(stmt -> {
+                    if (stmt instanceof Invoke il) {
+                        if (il.getInvokeExp()  instanceof InvokeDynamic)
+                            return;
+                        MockJMethod mockJMethod = new MockJMethod(il.getInvokeExp().getMethodRef(),new HashSet<>());
+                        String stmtMethodSignature = il.getInvokeExp().getMethodRef().getSubsignature().toString();
+                        for(Pair<Object,Object> pair : phantomSinks){
+                            String methodSig = pair.first().toString();
+                            int index = Integer.parseInt(pair.second().toString());
+                            if(methodSig.contains(stmtMethodSignature)){
+                                Sink sink = new Sink(mockJMethod,new IndexRef(IndexRef.Kind.VAR,index,null));
+                                SinkPoint sinkPoint = new SinkPoint(il, new IndexRef(IndexRef.Kind.VAR,index,null), sink);
+                                if(index < il.getInvokeExp().getArgCount()){
+                                    Var var = il.getInvokeExp().getArg(index);
+//                                        TaintManager taintManager = new TaintManager(solver.getHeapModel()) ;
+//                                        taintManager.isTaint(var);
+                                    Set<Obj> objs = csManager.getCSVarsOf(var)
+                                            .stream()
+                                            .flatMap(Pointer::objects)
+                                            .map(CSObj::getObject)
+                                            .collect(Collectors.toUnmodifiableSet());
+                                    taintFlows.addAll(objs.stream()
+                                            .filter(manager::isTaint)
+                                            .map(manager::getSourcePoint)
+                                            .map(sourcePoint -> new TaintFlow(sourcePoint, sinkPoint))
+                                            .collect(Collectors.toSet()));
+                                }
+                                else{
+                                    System.out.println("PhantomSink:" + " wrong index!\n" + methodSig + " index:" + index);
+                                }
+                            }
+                        }
+
+                    }
+                });
+            }
+        }
+        return taintFlows;
     }
 
     Set<TaintFlow> collectTaintFlows() {
@@ -82,6 +146,7 @@ class SinkHandler extends Handler {
                         }
                     });
         }
+        taintFlows.addAll(addTaintFlow());
         return taintFlows;
     }
 

@@ -25,6 +25,7 @@ package pascal.taie.analysis.pta.plugin.taint;
 import pascal.taie.language.classes.ClassHierarchy;
 import pascal.taie.language.classes.SignatureMatcher;
 import pascal.taie.language.type.TypeSystem;
+import pascal.taie.util.collection.Pair;
 
 import java.util.List;
 
@@ -65,6 +66,11 @@ public abstract class TaintConfigProvider {
         return List.of();
     }
 
+
+    protected List<Pair<Object,Object>> phantomSinks(){
+        return List.of();
+    }
+
     protected boolean callSiteMode() {
         return false;
     }
@@ -72,7 +78,7 @@ public abstract class TaintConfigProvider {
     public TaintConfig get() {
         return new TaintConfig(unmodifiableList(sources()),
                 unmodifiableList(sinks()), unmodifiableList(transfers()),
-                unmodifiableList(sanitizers()), callSiteMode());
+                unmodifiableList(sanitizers()), unmodifiableList(phantomSinks()), callSiteMode());
     }
 
 }

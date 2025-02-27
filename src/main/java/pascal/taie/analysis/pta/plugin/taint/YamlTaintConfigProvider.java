@@ -44,6 +44,7 @@ import pascal.taie.language.type.ArrayType;
 import pascal.taie.language.type.ClassType;
 import pascal.taie.language.type.Type;
 import pascal.taie.language.type.TypeSystem;
+import pascal.taie.util.collection.Pair;
 
 import java.io.File;
 import java.io.IOException;
@@ -134,6 +135,9 @@ public class YamlTaintConfigProvider extends TaintConfigProvider {
 
         private final TypeSystem typeSystem;
 
+
+        List<Pair<Object,Object>> phantomSinks;
+
         private Deserializer(SignatureMatcher matcher, TypeSystem typeSystem) {
             this.matcher = matcher;
             this.typeSystem = typeSystem;
@@ -148,10 +152,11 @@ public class YamlTaintConfigProvider extends TaintConfigProvider {
             List<Sink> sinks = deserializeSinks(node.get("sinks"));
             List<TaintTransfer> transfers = deserializeTransfers(node.get("transfers"));
             List<ParamSanitizer> sanitizers = deserializeSanitizers(node.get("sanitizers"));
+            List<Pair<Object,Object>> phantomSinks = deserializePhantomSinks(node.get("sinks"));
             JsonNode callSiteNode = node.get("call-site-mode");
             boolean callSiteMode = (callSiteNode != null && callSiteNode.asBoolean());
             return new TaintConfig(
-                    sources, sinks, transfers, sanitizers, callSiteMode);
+                    sources, sinks, transfers, sanitizers, phantomSinks, callSiteMode);
         }
 
         /**
@@ -282,6 +287,49 @@ public class YamlTaintConfigProvider extends TaintConfigProvider {
                     result.addAll(sinks);
                 }
                 return Collections.unmodifiableList(result);
+            } else {
+                // if node is not an instance of ArrayNode, just return an empty set.
+                return List.of();
+            }
+        }
+
+        /**
+         * Deserializes a {@link JsonNode} (assume it is an {@link ArrayNode})
+         * to a list of {@link Sink}.
+         *
+         * @param node the node to be deserialized
+         * @return list of deserialized {@link Sink}
+         */
+        private List<Pair<Object,Object>> deserializePhantomSinks(JsonNode node) {
+            if (node instanceof ArrayNode arrayNode) {
+                List<Pair<Object,Object>> result = new ArrayList<>();
+                for (JsonNode elem : arrayNode) {
+                    String methodSig = elem.get("method").asText();
+                    if(matcher.getMethods(methodSig).isEmpty()) {
+                        Pair<Object,Object> phantomSink = new Pair<>(methodSig, elem.get("index"));
+                        result.add(phantomSink);
+                    }
+//                    List<Sink> sinks = matcher.getMethods(methodSig).stream().map(method -> {
+//                        IndexRef indexRef = toIndexRef(method, elem.get("index").asText());
+//                        return new Sink(method, indexRef);
+//                    }).toList();
+//                    if (sinks.isEmpty()) {
+//                        // if we do not find matched methods with the signature
+//                        // given in config file, just ignore it.
+//                        logger.warn("Cannot find sink method '{}'", methodSig);
+//                    }
+//                    result.addAll(sinks);
+                }
+
+//                List<Sink> tkMybatisSinks = AddTkMybatisSinkHandler.addTkMybatis();
+//
+//                result.addAll(tkMybatisSinks);
+//                List<Sink> mybatisSinks = AddMybatisSinkHandler.AddMybatisSink();
+//                result.addAll(mybatisSinks);
+//                for(int i = 0;i < result.size();i++){
+//                    System.out.println("---" + result.get(i));
+//                }
+                return result;
             } else {
                 // if node is not an instance of ArrayNode, just return an empty set.
                 return List.of();

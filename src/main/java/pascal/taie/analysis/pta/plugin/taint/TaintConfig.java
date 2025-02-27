@@ -23,6 +23,7 @@
 package pascal.taie.analysis.pta.plugin.taint;
 
 import pascal.taie.util.collection.Lists;
+import pascal.taie.util.collection.Pair;
 
 import java.util.List;
 
@@ -33,13 +34,14 @@ public record TaintConfig(List<Source> sources,
                           List<Sink> sinks,
                           List<TaintTransfer> transfers,
                           List<ParamSanitizer> paramSanitizers,
+                          List<Pair<Object,Object>> phantomSinks,
                           boolean callSiteMode) {
 
     /**
      * An empty taint config.
      */
     public static final TaintConfig EMPTY = new TaintConfig(
-            List.of(), List.of(), List.of(), List.of(), false);
+            List.of(), List.of(), List.of(), List.of(), List.of(), false);
 
     /**
      * Merges this taint config with other taint config.
@@ -51,6 +53,7 @@ public record TaintConfig(List<Source> sources,
                 Lists.concatDistinct(sinks, other.sinks),
                 Lists.concatDistinct(transfers, other.transfers),
                 Lists.concatDistinct(paramSanitizers, other.paramSanitizers),
+                Lists.concatDistinct(phantomSinks, other.phantomSinks),
                 callSiteMode || other.callSiteMode);
     }
 
@@ -76,6 +79,11 @@ public record TaintConfig(List<Source> sources,
             sb.append("\nsanitizers:\n");
             paramSanitizers.forEach(sanitizer ->
                     sb.append("  - ").append(sanitizer).append("\n"));
+        }
+        if(!phantomSinks.isEmpty()) {
+            sb.append("\nphantomSinks:\n");
+            phantomSinks.forEach(pair ->
+                    sb.append("  - ").append(pair.first()).append(", index:").append("\"").append(pair.second()).append("\"").append("\n"));
         }
         if (callSiteMode) {
             sb.append("\ncallSiteMode: true\n");
