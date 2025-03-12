@@ -10,6 +10,7 @@
 package pascal.taie.analysis.pta.plugin.taint;
 
 import pascal.taie.ir.IR;
+import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.language.annotation.Annotation;
 import pascal.taie.language.annotation.AnnotationHolder;
 import pascal.taie.language.classes.JClass;
@@ -26,6 +27,7 @@ import java.util.*;
 
 public class MockJMethod extends JMethod {
 
+    private Invoke invoke;
     public MockJMethod(JClass declaringClass, String name, Set<Modifier> modifiers, List<Type> paramTypes, Type returnType){
         super(declaringClass, name, modifiers, paramTypes, returnType, new ArrayList<>(), null, AnnotationHolder.emptyHolder(), null, null, new Object());
 //        Set<Modifier> modifiers = new HashSet<>();
@@ -42,8 +44,9 @@ public class MockJMethod extends JMethod {
     }
 
 
-    public MockJMethod(MethodRef methodRef,Set<Modifier> modifiers){
+    public MockJMethod(MethodRef methodRef,Set<Modifier> modifiers, Invoke invoke){
         super(methodRef.getDeclaringClass(),methodRef.getName(),modifiers,methodRef.getParameterTypes(),methodRef.getReturnType(),new ArrayList<>(),null,AnnotationHolder.emptyHolder(),null, null, new Object());
+        this.invoke = invoke;
     }
 
 
@@ -55,5 +58,14 @@ public class MockJMethod extends JMethod {
     public IR getIR() {
 
         return null;
+    }
+
+
+    public void setInvoke(Invoke invoke){
+        this.invoke = invoke;
+    }
+
+    public Invoke getInvoke(){
+        return this.invoke;
     }
 }

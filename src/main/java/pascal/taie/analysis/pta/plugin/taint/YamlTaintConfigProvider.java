@@ -33,8 +33,13 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import pascal.taie.World;
 import pascal.taie.analysis.pta.plugin.util.InvokeUtils;
 import pascal.taie.config.ConfigException;
+import pascal.taie.ir.IR;
+import pascal.taie.ir.exp.InvokeDynamic;
+import pascal.taie.ir.stmt.Invoke;
+import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.language.classes.ClassHierarchy;
 import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JField;
@@ -52,6 +57,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -303,23 +309,56 @@ public class YamlTaintConfigProvider extends TaintConfigProvider {
         private List<Pair<Object,Object>> deserializePhantomSinks(JsonNode node) {
             if (node instanceof ArrayNode arrayNode) {
                 List<Pair<Object,Object>> result = new ArrayList<>();
-                for (JsonNode elem : arrayNode) {
-                    String methodSig = elem.get("method").asText();
-                    if(matcher.getMethods(methodSig).isEmpty()) {
-                        Pair<Object,Object> phantomSink = new Pair<>(methodSig, elem.get("index"));
-                        result.add(phantomSink);
+                List<JClass> classList = World.get().getClassHierarchy().applicationClasses().toList();
+                for(JClass jClass: classList) {
+                    if (jClass.isPhantom()) {
+                        continue;
                     }
-//                    List<Sink> sinks = matcher.getMethods(methodSig).stream().map(method -> {
-//                        IndexRef indexRef = toIndexRef(method, elem.get("index").asText());
-//                        return new Sink(method, indexRef);
-//                    }).toList();
-//                    if (sinks.isEmpty()) {
-//                        // if we do not find matched methods with the signature
-//                        // given in config file, just ignore it.
-//                        logger.warn("Cannot find sink method '{}'", methodSig);
-//                    }
-//                    result.addAll(sinks);
+                    for (JMethod jMethod : jClass.getDeclaredMethods()) {
+                        if (jMethod.isAbstract()) {
+                            continue;
+                        }
+                        IR methodIR = jMethod.getIR();
+                        List<Stmt> stmts = methodIR.getStmts();
+                        stmts.parallelStream().forEach(stmt -> {
+                            if (stmt instanceof Invoke il) {
+                                if (il.getInvokeExp() instanceof InvokeDynamic)
+                                    return;
+                                String invokeMethodSignature = il.getInvokeExp().getMethodRef().getSubsignature().toString();
+                                String invokeMethodClassName = il.getInvokeExp().getMethodRef().getDeclaringClass().getName();
+                                String invokeMethodFullSig = invokeMethodClassName + ": " + invokeMethodSignature;
+                                for (JsonNode elem : arrayNode) {
+                                    String methodSig = elem.get("method").asText();
+                                    if(matcher.getMethods(methodSig).isEmpty() && methodSig.contains(invokeMethodFullSig)) {
+                                        MockJMethod mockJMethod = new MockJMethod(il.getInvokeExp().getMethodRef(),new HashSet<>(), il);
+                                        Pair<Object,Object> phantomSink = new Pair<>(mockJMethod, elem.get("index"));
+                                        boolean a = false;
+                                        for(Pair<Object,Object> pair: result) {
+                                            if(pair.toString().equals(phantomSink.toString())) {
+                                                a = true;
+                                                break;
+                                            }
+                                        }
+                                        if(!a){
+                                            result.add(phantomSink);
+                                        }
+                                    }
+    //                    List<Sink> sinks = matcher.getMethods(methodSig).stream().map(method -> {
+    //                        IndexRef indexRef = toIndexRef(method, elem.get("index").asText());
+    //                        return new Sink(method, indexRef);
+    //                    }).toList();
+    //                    if (sinks.isEmpty()) {
+    //                        // if we do not find matched methods with the signature
+    //                        // given in config file, just ignore it.
+    //                        logger.warn("Cannot find sink method '{}'", methodSig);
+    //                    }
+    //                    result.addAll(sinks);
+                                }
+                            }
+                        });
+                    }
                 }
+
 
 //                List<Sink> tkMybatisSinks = AddTkMybatisSinkHandler.addTkMybatis();
 //
