@@ -34,7 +34,7 @@ public record TaintConfig(List<Source> sources,
                           List<Sink> sinks,
                           List<TaintTransfer> transfers,
                           List<ParamSanitizer> paramSanitizers,
-                          List<Pair<Object,Object>> phantomSinks,
+                          List<PhantomSink> phantomSinks,
                           boolean callSiteMode) {
 
     /**
@@ -82,8 +82,8 @@ public record TaintConfig(List<Source> sources,
         }
         if(!phantomSinks.isEmpty()) {
             sb.append("\nphantomSinks:\n");
-            phantomSinks.forEach(pair ->
-                    sb.append("  - ").append(pair.first()).append(", index:").append("\"").append(pair.second()).append("\"").append("\n"));
+            phantomSinks.forEach(phantomSink ->
+                    sb.append("  - ").append(phantomSink).append("\n"));
         }
         if (callSiteMode) {
             sb.append("\ncallSiteMode: true\n");

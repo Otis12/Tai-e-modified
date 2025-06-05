@@ -67,7 +67,7 @@ public abstract class TaintConfigProvider {
     }
 
 
-    protected List<Pair<Object,Object>> phantomSinks(){
+    protected List<PhantomSink> phantomSinks(){
         return List.of();
     }
 

@@ -158,7 +158,7 @@ public class YamlTaintConfigProvider extends TaintConfigProvider {
             List<Sink> sinks = deserializeSinks(node.get("sinks"));
             List<TaintTransfer> transfers = deserializeTransfers(node.get("transfers"));
             List<ParamSanitizer> sanitizers = deserializeSanitizers(node.get("sanitizers"));
-            List<Pair<Object,Object>> phantomSinks = deserializePhantomSinks(node.get("sinks"));
+            List<PhantomSink> phantomSinks = deserializePhantomSinks(node.get("sinks"));
             JsonNode callSiteNode = node.get("call-site-mode");
             boolean callSiteMode = (callSiteNode != null && callSiteNode.asBoolean());
             return new TaintConfig(
@@ -306,9 +306,9 @@ public class YamlTaintConfigProvider extends TaintConfigProvider {
          * @param node the node to be deserialized
          * @return list of deserialized {@link Sink}
          */
-        private List<Pair<Object,Object>> deserializePhantomSinks(JsonNode node) {
+        private List<PhantomSink> deserializePhantomSinks(JsonNode node) {
             if (node instanceof ArrayNode arrayNode) {
-                List<Pair<Object,Object>> result = new ArrayList<>();
+                List<PhantomSink> result = new ArrayList<>();
                 List<JClass> classList = World.get().getClassHierarchy().applicationClasses().toList();
                 for(JClass jClass: classList) {
                     if (jClass.isPhantom()) {
@@ -331,10 +331,16 @@ public class YamlTaintConfigProvider extends TaintConfigProvider {
                                     String methodSig = elem.get("method").asText();
                                     if(matcher.getMethods(methodSig).isEmpty() && methodSig.contains(invokeMethodFullSig)) {
                                         MockJMethod mockJMethod = new MockJMethod(il.getInvokeExp().getMethodRef(),new HashSet<>(), il);
-                                        Pair<Object,Object> phantomSink = new Pair<>(mockJMethod, elem.get("index"));
+                                        int index = Integer.parseInt(elem.get("index").asText());
+                                        if (index >= il.getInvokeExp().getArgCount()){
+                                            logger.error("PhantomSink: wrong index!\n<{}>, index: {}",mockJMethod.toString(),index);
+                                        }
+                                        IndexRef indexRef = new IndexRef(IndexRef.Kind.VAR, index, null);
+                                        PhantomSink phantomSink = new PhantomSink(mockJMethod,indexRef);
+//                                        Pair<Object,Object> phantomSink = new Pair<>(mockJMethod, elem.get("index"));
                                         boolean a = false;
-                                        for(Pair<Object,Object> pair: result) {
-                                            if(pair.toString().equals(phantomSink.toString())) {
+                                        for(PhantomSink phantomSinka: result) {
+                                            if(phantomSinka.toString().equals(phantomSink.toString())) {
                                                 a = true;
                                                 break;
                                             }

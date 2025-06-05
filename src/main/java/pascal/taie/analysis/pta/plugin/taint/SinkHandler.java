@@ -54,8 +54,8 @@ import java.util.stream.Collectors;
  */
 public class SinkHandler extends Handler {
 
-    private final List<Sink> sinks;
-    private final List<Pair<Object,Object>> phantomSinks;
+    private List<Sink> sinks;
+    private List<PhantomSink> phantomSinks;
 
     public SinkHandler(HandlerContext context) {
         super(context);
@@ -64,35 +64,42 @@ public class SinkHandler extends Handler {
     }
 
 
+    public void setSinks(List<Sink> sinks){
+        this.sinks = sinks;
+    }
+
     public Set<TaintFlow> addTaintFlow(){
         Set<TaintFlow> taintFlows = new HashSet<>();
         PointerAnalysisResult result = solver.getResult();
         List<JClass> classList = World.get().getClassHierarchy().applicationClasses().toList();
-        for(Pair<Object,Object> pair: phantomSinks){
-            MockJMethod mockJMethod = (MockJMethod)pair.first();
-            int index = Integer.parseInt(pair.second().toString());
+        for(PhantomSink phantomSink: phantomSinks){
+            MockJMethod mockJMethod = phantomSink.method();
+            IndexRef indexRef = phantomSink.indexRef();
+//            int index = Integer.parseInt(pair.second().toString());
 
             Invoke invoke = mockJMethod.getInvoke();
-            Sink sink = new Sink(mockJMethod,new IndexRef(IndexRef.Kind.VAR,index,null));
-            SinkPoint sinkPoint = new SinkPoint(invoke, new IndexRef(IndexRef.Kind.VAR,index,null), sink);
-            if(index < invoke.getInvokeExp().getArgCount()){
-                Var var = invoke.getInvokeExp().getArg(index);
+            Sink sink = new Sink(mockJMethod,indexRef);
+            SinkPoint sinkPoint = new SinkPoint(invoke, indexRef, sink);
+            Var var = InvokeUtils.getVar(invoke,indexRef.index());
 //                                        TaintManager taintManager = new TaintManager(solver.getHeapModel()) ;
 //                                        taintManager.isTaint(var);
-                Set<Obj> objs = csManager.getCSVarsOf(var)
-                        .stream()
-                        .flatMap(Pointer::objects)
-                        .map(CSObj::getObject)
-                        .collect(Collectors.toUnmodifiableSet());
-                taintFlows.addAll(objs.stream()
-                        .filter(manager::isTaint)
-                        .map(manager::getSourcePoint)
-                        .map(sourcePoint -> new TaintFlow(sourcePoint, sinkPoint))
-                        .collect(Collectors.toSet()));
-            }
-            else{
-                System.out.println("PhantomSink:" + " wrong index!\n" + "< " + mockJMethod.toString() + ">" + " index:" + index);
-            }
+            Set<Obj> objs = csManager.getCSVarsOf(var)
+                    .stream()
+                    .flatMap(Pointer::objects)
+                    .map(CSObj::getObject)
+                    .collect(Collectors.toUnmodifiableSet());
+            taintFlows.addAll(objs.stream()
+                    .filter(manager::isTaint)
+                    .map(manager::getSourcePoint)
+                    .map(sourcePoint -> new TaintFlow(sourcePoint, sinkPoint))
+                    .collect(Collectors.toSet()));
+
+//            if(index < invoke.getInvokeExp().getArgCount()){
+//
+//            }
+//            else{
+//                System.out.println("PhantomSink:" + " wrong index!\n" + "< " + mockJMethod.toString() + ">" + " index:" + index);
+//            }
         }
 //        for(JClass jClass: classList){
 //            if(jClass.isPhantom()){
