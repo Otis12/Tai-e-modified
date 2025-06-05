@@ -192,6 +192,11 @@ public class LambdaAnalysis implements Plugin {
                 // Obtain receiver variable and context
                 Var recvVar;
                 Context recvCtx;
+
+                if (capturedArgs.isEmpty() && actualArgs.isEmpty()) {
+                    return;
+                }
+
                 if (!capturedArgs.isEmpty()) {
                     // if captured arguments are not empty, then the first one
                     // must be the receiver object for targetRef
@@ -301,6 +306,9 @@ public class LambdaAnalysis implements Plugin {
             List<Var> actualArgs = invoke.getInvokeExp().getArgs();
             Context callerContext = csCallSite.getContext();
             for (int i = shiftA; i < actualArgs.size(); ++i, ++j) {
+                if (j >= targetParams.size()) {
+                    break;
+                }
                 solver.addPFGEdge(new PointerFlowEdge(
                         FlowKind.PARAMETER_PASSING,
                         csManager.getCSVar(callerContext, actualArgs.get(i)),

@@ -426,9 +426,12 @@ public class DefaultSolver implements Solver {
                         ArrayIndex arrayIndex = csManager.getArrayIndex(array);
                         // we need type guard for array stores as Java arrays
                         // are covariant
-                        addPFGEdge(new PointerFlowEdge(
-                                FlowKind.ARRAY_STORE, from, arrayIndex),
-                                arrayIndex.getType());
+                        try {
+                            addPFGEdge(new PointerFlowEdge(FlowKind.ARRAY_STORE, from, arrayIndex), arrayIndex.getType());
+                        } catch (Exception e) {
+                            addPFGEdge(from, arrayIndex, FlowKind.ARRAY_STORE);
+                        }
+
                     }
                 });
             }
