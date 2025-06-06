@@ -331,8 +331,8 @@ public class YamlTaintConfigProvider extends TaintConfigProvider {
                                     String methodSig = elem.get("method").asText();
                                     if(matcher.getMethods(methodSig).isEmpty() && methodSig.contains(invokeMethodFullSig)) {
                                         MockJMethod mockJMethod = new MockJMethod(il.getInvokeExp().getMethodRef(),new HashSet<>(), il);
-                                        int index = Integer.parseInt(elem.get("index").asText());
-                                        if (index >= il.getInvokeExp().getArgCount()){
+                                        int index = InvokeUtils.toInt(elem.get("index").asText());
+                                        if (index >= 0 && index >= il.getInvokeExp().getArgCount()){
                                             logger.error("PhantomSink: wrong index!\n<{}>, index: {}",mockJMethod.toString(),index);
                                         }
                                         IndexRef indexRef = new IndexRef(IndexRef.Kind.VAR, index, null);
