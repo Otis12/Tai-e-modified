@@ -69,7 +69,7 @@ public class TFGBuilder {
     /**
      * Whether only track taint flow in application code.
      */
-    private final boolean onlyApp = true;
+    private final boolean onlyApp = false;
 
     /**
      * Whether only track taint flow that reaches any sink.
