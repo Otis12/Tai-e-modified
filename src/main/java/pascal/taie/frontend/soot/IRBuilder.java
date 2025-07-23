@@ -37,13 +37,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-class IRBuilder implements pascal.taie.ir.IRBuilder {
+public class IRBuilder implements pascal.taie.ir.IRBuilder {
 
     private static final Logger logger = LogManager.getLogger(IRBuilder.class);
 
     private final transient Converter converter;
 
-    IRBuilder(Converter converter) {
+    public IRBuilder(Converter converter) {
         this.converter = converter;
     }
 

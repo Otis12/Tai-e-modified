@@ -107,7 +107,7 @@ import static pascal.taie.util.collection.Maps.newConcurrentMap;
 /**
  * Converts Soot classes to Tai-e's representation.
  */
-class Converter {
+public class Converter {
 
     private final JClassLoader loader;
 
@@ -127,7 +127,7 @@ class Converter {
     private final ConcurrentMap<SootMethodRef, MethodRef> methodRefMap
             = newConcurrentMap(4096);
 
-    Converter(JClassLoader loader, TypeSystem typeSystem) {
+    public Converter(JClassLoader loader, TypeSystem typeSystem) {
         this.loader = loader;
         this.typeSystem = typeSystem;
     }
@@ -179,7 +179,7 @@ class Converter {
                         convertAnnotations(sootField)));
     }
 
-    JMethod convertMethod(SootMethod sootMethod) {
+    public JMethod convertMethod(SootMethod sootMethod) {
         return methodMap.computeIfAbsent(sootMethod, m -> {
             List<Type> paramTypes = Lists.map(
                     m.getParameterTypes(), this::convertType);

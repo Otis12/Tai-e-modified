@@ -32,7 +32,7 @@ import soot.SootClass;
 import java.util.Collection;
 import java.util.Map;
 
-class SootClassLoader implements JClassLoader {
+public class SootClassLoader implements JClassLoader {
 
     private final transient Scene scene;
 
@@ -44,7 +44,7 @@ class SootClassLoader implements JClassLoader {
 
     private final Map<String, JClass> classes = Maps.newMap(1024);
 
-    SootClassLoader(Scene scene, ClassHierarchy hierarchy, boolean allowPhantom) {
+    public SootClassLoader(Scene scene, ClassHierarchy hierarchy, boolean allowPhantom) {
         this.scene = scene;
         this.hierarchy = hierarchy;
         this.allowPhantom = allowPhantom;
@@ -77,7 +77,7 @@ class SootClassLoader implements JClassLoader {
         return classes.values();
     }
 
-    void setConverter(Converter converter) {
+    public void setConverter(Converter converter) {
         this.converter = converter;
     }
 }
