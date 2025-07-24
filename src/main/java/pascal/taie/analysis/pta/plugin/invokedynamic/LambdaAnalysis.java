@@ -42,6 +42,7 @@ import pascal.taie.analysis.pta.plugin.util.CSObjs;
 import pascal.taie.analysis.pta.pts.PointsToSet;
 import pascal.taie.ir.exp.InvokeDynamic;
 import pascal.taie.ir.exp.MethodHandle;
+import pascal.taie.ir.exp.MethodType;
 import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.proginfo.MethodRef;
 import pascal.taie.ir.stmt.Invoke;
@@ -155,7 +156,8 @@ public class LambdaAnalysis implements Plugin {
         MockObj lambdaObj = (MockObj) recv.getObject();
         Invoke indyInvoke = (Invoke) lambdaObj.getAllocation();
         InvokeDynamic indy = (InvokeDynamic) indyInvoke.getInvokeExp();
-        if (!indy.getMethodName().equals(invoke.getMethodRef().getName())) {
+        MethodType mt = (MethodType)indy.getBootstrapArgs().get(2);
+        if (!indy.getMethodName().equals(invoke.getMethodRef().getName()) || !indy.getMethodType().getReturnType().getName().equals(invoke.getInvokeExp().getMethodRef().getDeclaringClass().getName()) || !(mt.getParamTypes().size() == invoke.getInvokeExp().getArgCount())) {
             // Use method name to filter out mismatched (caused by imprecision
             // of pointer analysis) lambda objects and actual invocation sites.
             // TODO: use more information to filter out mismatches?
@@ -312,9 +314,9 @@ public class LambdaAnalysis implements Plugin {
                 solver.addPFGEdge(new PointerFlowEdge(
                         FlowKind.PARAMETER_PASSING,
                         csManager.getCSVar(callerContext, actualArgs.get(i)),
-                        csManager.getCSVar(calleeContext, targetParams.get(j))),
+                        csManager.getCSVar(calleeContext, targetParams.get(j)))
                         // filter spurious objects caused by imprecise lambda objects
-                         targetParams.get(j).getType());
+                );
             }
             // pass return value
             Var result = invoke.getResult();
