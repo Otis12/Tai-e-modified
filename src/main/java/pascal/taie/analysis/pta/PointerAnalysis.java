@@ -32,6 +32,7 @@ import pascal.taie.analysis.pta.core.heap.AllocationSiteBasedModel;
 import pascal.taie.analysis.pta.core.heap.HeapModel;
 import pascal.taie.analysis.pta.core.solver.DefaultSolver;
 import pascal.taie.analysis.pta.core.solver.Solver;
+import pascal.taie.analysis.pta.core.solver.SummarySolver;
 import pascal.taie.analysis.pta.plugin.AnalysisTimer;
 import pascal.taie.analysis.pta.plugin.ClassInitializer;
 import pascal.taie.analysis.pta.plugin.CompositePlugin;
@@ -76,6 +77,9 @@ public class PointerAnalysis extends ProgramAnalysis<PointerAnalysisResult> {
         ContextSelector selector = null;
         String advanced = options.getString("advanced");
         String cs = options.getString("cs");
+        String codesummary = options.getString("codesummary");
+//        String codesummary = "1";
+
         if (advanced != null) {
             if (advanced.equals("collection")) {
                 selector = ContextSelectorFactory.makeSelectiveSelector(cs,
@@ -83,7 +87,7 @@ public class PointerAnalysis extends ProgramAnalysis<PointerAnalysisResult> {
             } else {
                 // run context-insensitive analysis as pre-analysis
                 PointerAnalysisResult preResult = runAnalysis(heapModel,
-                        ContextSelectorFactory.makeCISelector());
+                        ContextSelectorFactory.makeCISelector(), codesummary);
                 if (advanced.startsWith("scaler")) {
                     selector = Timer.runAndCount(() -> ContextSelectorFactory
                                     .makeGuidedSelector(Scaler.run(preResult, advanced)),
@@ -101,20 +105,28 @@ public class PointerAnalysis extends ProgramAnalysis<PointerAnalysisResult> {
                 }
             }
         }
+
+
         if (selector == null) {
             selector = ContextSelectorFactory.makePlainSelector(cs);
         }
-        return runAnalysis(heapModel, selector);
+        return runAnalysis(heapModel, selector, codesummary);
     }
 
     private PointerAnalysisResult runAnalysis(HeapModel heapModel,
-                                              ContextSelector selector) {
+                                              ContextSelector selector, String codesummary) {
         AnalysisOptions options = getOptions();
-        Solver solver = new DefaultSolver(options,
-                heapModel, selector, new MapBasedCSManager());
+        Solver solver;
         // The initialization of some Plugins may read the fields in solver,
         // e.g., contextSelector or csManager, thus we initialize Plugins
         // after setting all other fields of solver.
+
+        if(codesummary.equals("codesummary")) {
+            solver = new SummarySolver(options, heapModel, selector, new MapBasedCSManager());
+        } else {
+            solver = new DefaultSolver(options, heapModel, selector, new MapBasedCSManager());
+        }
+
         setPlugin(solver, options);
         solver.solve();
         return solver.getResult();
@@ -129,8 +141,10 @@ public class PointerAnalysis extends ProgramAnalysis<PointerAnalysisResult> {
                 new EntryPointHandler(),
                 new ClassInitializer(),
                 new ThreadHandler(),
-                new NativeModeller(),
-                new ExceptionAnalysis()
+                new NativeModeller()
+                // ExceptionAnalysis disabled for memory optimization
+                // Uncomment if you need exception flow tracking in taint analysis
+                // new ExceptionAnalysis()
         );
         int javaVersion = World.get().getOptions().getJavaVersion();
         if (javaVersion < 9) {

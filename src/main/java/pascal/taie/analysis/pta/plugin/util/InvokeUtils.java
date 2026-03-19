@@ -86,7 +86,13 @@ public final class InvokeUtils {
         return switch (index) {
             case BASE -> ((InvokeInstanceExp) invokeExp).getBase();
             case RESULT -> callSite.getResult();
-            default -> invokeExp.getArg(index);
+            default -> {
+                // javaparser debug: bounds check to handle mismatched taint rules
+                if (index >= invokeExp.getArgCount()) {
+                    yield null;
+                }
+                yield invokeExp.getArg(index);
+            }
         };
     }
 }

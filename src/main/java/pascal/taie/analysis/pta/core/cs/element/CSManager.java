@@ -124,4 +124,9 @@ public interface CSManager {
      * The indexer is useful for creating efficient points-to sets.
      */
     Indexer<CSObj> getObjectIndexer();
+
+    /**
+     * @return all context-sensitive call sites.
+     */
+    Collection<CSCallSite> getCSCallSites();
 }

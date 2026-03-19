@@ -56,7 +56,7 @@ public class MapBasedCSManager implements CSManager {
 
     private final TwoKeyMap<Invoke, Context, CSCallSite> callSites = Maps.newTwoKeyMap();
 
-    private final TwoKeyMap<JMethod, Context, CSMethod> methods = Maps.newTwoKeyMap();
+    public final TwoKeyMap<JMethod, Context, CSMethod> methods = Maps.newTwoKeyMap();
 
     @Override
     public CSVar getCSVar(Context context, Var var) {
@@ -144,6 +144,11 @@ public class MapBasedCSManager implements CSManager {
     @Override
     public CSMethod getCSMethod(Context context, JMethod method) {
         return methods.computeIfAbsent(method, context, CSMethod::new);
+    }
+
+    @Override
+    public Collection<CSCallSite> getCSCallSites() {
+        return callSites.values();
     }
 
     private static class PointerManager {

@@ -17,13 +17,13 @@ dependencies {
     // Process YAML configuration files
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.17.2")
     // Use Soot as frontend
-    implementation(files("lib/sootclasses-modified.jar"))
-    "org.soot-oss:soot:4.4.1".let {
-        // Disable transitive dependencies from Soot in compile classpath
-        compileOnly(it) { isTransitive = false }
-        testCompileOnly(it) { isTransitive = false }
-        runtimeOnly(it)
-    }
+    implementation(files("lib/sootclasses-trunk-jar-with-dependencies.jar"))
+//    "org.soot-oss:soot:4.4.1".let {
+//        // Disable transitive dependencies from Soot in compile classpath
+//        compileOnly(it) { isTransitive = false }
+//        testCompileOnly(it) { isTransitive = false }
+//        runtimeOnly(it)
+//    }
     // Use ASM to read Java class files
     implementation("org.ow2.asm:asm:9.4")
     // Eliminate SLF4J warning

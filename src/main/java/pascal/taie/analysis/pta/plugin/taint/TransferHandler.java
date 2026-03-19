@@ -120,6 +120,13 @@ public class TransferHandler extends OnFlyHandler {
             return;
         }
         Var fromVar = InvokeUtils.getVar(callSite, from.index());
+        // javaparser debug: handle null when index out of bounds
+        if (fromVar == null) {
+            logger.debug("[javaparser debug] Transfer rule mismatch: callSite={}, " +
+                    "transfer.from.index={}, argCount={}", 
+                    callSite, from.index(), callSite.getInvokeExp().getArgCount());
+            return;
+        }
         CSVar csFrom = csManager.getCSVar(context, fromVar);
         CSVar csTo = csManager.getCSVar(context, toVar);
         if (from.kind() == IndexRef.Kind.VAR) { // Var -> Var/Array/Field

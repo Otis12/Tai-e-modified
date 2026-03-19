@@ -250,10 +250,11 @@ public class TaintAnalysis extends CompositePlugin {
         logger.info("Detected {} taint flow(s):", taintFlows.size());
         taintFlows.forEach(logger::info);
         solver.getResult().storeResult(getClass().getName(), taintFlows);
-        TaintManager manager = context.manager();
-        Timer.runAndCount(() -> new TFGDumper().dump(
-                        new TFGBuilder(solver.getResult(), taintFlows, manager).build(),
-                        new File(World.get().getOptions().getOutputDir(), TAINT_FLOW_GRAPH_FILE)),
-                "TFGDumper");
+        // TFGDumper disabled for performance - uncomment to enable
+        // TaintManager manager = context.manager();
+        // Timer.runAndCount(() -> new TFGDumper().dump(
+        //                 new TFGBuilder(solver.getResult(), taintFlows, manager).build(),
+        //                 new File(World.get().getOptions().getOutputDir(), TAINT_FLOW_GRAPH_FILE)),
+        //         "TFGDumper");
     }
 }

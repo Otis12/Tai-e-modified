@@ -308,7 +308,7 @@ public class YamlTaintConfigProvider extends TaintConfigProvider {
          */
         private List<PhantomSink> deserializePhantomSinks(JsonNode node) {
             if (node instanceof ArrayNode arrayNode) {
-                List<PhantomSink> result = new ArrayList<>();
+                List<PhantomSink> result = Collections.synchronizedList(new ArrayList<>());
                 List<JClass> classList = World.get().getClassHierarchy().applicationClasses().toList();
                 for(JClass jClass: classList) {
                     if (jClass.isPhantom()) {
@@ -349,16 +349,6 @@ public class YamlTaintConfigProvider extends TaintConfigProvider {
                                             result.add(phantomSink);
                                         }
                                     }
-    //                    List<Sink> sinks = matcher.getMethods(methodSig).stream().map(method -> {
-    //                        IndexRef indexRef = toIndexRef(method, elem.get("index").asText());
-    //                        return new Sink(method, indexRef);
-    //                    }).toList();
-    //                    if (sinks.isEmpty()) {
-    //                        // if we do not find matched methods with the signature
-    //                        // given in config file, just ignore it.
-    //                        logger.warn("Cannot find sink method '{}'", methodSig);
-    //                    }
-    //                    result.addAll(sinks);
                                 }
                             }
                         });

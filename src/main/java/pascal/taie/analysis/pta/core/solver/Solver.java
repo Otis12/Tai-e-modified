@@ -35,6 +35,7 @@ import pascal.taie.analysis.pta.core.cs.element.Pointer;
 import pascal.taie.analysis.pta.core.cs.selector.ContextSelector;
 import pascal.taie.analysis.pta.core.heap.HeapModel;
 import pascal.taie.analysis.pta.core.heap.Obj;
+import pascal.taie.analysis.pta.core.solver.summary.SummaryManager;
 import pascal.taie.analysis.pta.plugin.Plugin;
 import pascal.taie.analysis.pta.pts.PointsToSet;
 import pascal.taie.config.AnalysisOptions;
@@ -231,4 +232,15 @@ public interface Solver {
      * @return pointer analysis result.
      */
     PointerAnalysisResult getResult();
+
+    // //code summary: 获取摘要管理器
+    /**
+     * Returns the summary manager for method summarization.
+     * This allows plugins to register summarized methods.
+     *
+     * @return the summary manager, or null if not supported
+     */
+    default SummaryManager getSummaryManager() {
+        return null; // 默认实现返回 null，子类可覆盖
+    }
 }

@@ -86,9 +86,9 @@ import java.util.regex.Matcher;
 import static pascal.taie.language.classes.Signatures.FINALIZE;
 import static pascal.taie.language.classes.Signatures.FINALIZER_REGISTER;
 
-public class DefaultSolver implements Solver {
+public class SummarySolver implements Solver {
 
-    private static final Logger logger = LogManager.getLogger(DefaultSolver.class);
+    private static final Logger logger = LogManager.getLogger(SummarySolver.class);
 
     /**
      * Descriptor for array objects created implicitly by multiarray instruction.
@@ -157,10 +157,11 @@ public class DefaultSolver implements Solver {
 
     private PointerAnalysisResult result;
 
-
+    // //code summary: 摘要管理器 - 用于注入式方法摘要
+    private SummaryManager summaryManager;
 
     @SuppressWarnings("unchecked")
-    public DefaultSolver(AnalysisOptions options, HeapModel heapModel,
+    public SummarySolver(AnalysisOptions options, HeapModel heapModel,
                          ContextSelector contextSelector, CSManager csManager) {
         this.options = options;
         this.heapModel = heapModel;
@@ -253,7 +254,23 @@ public class DefaultSolver implements Solver {
         initializedClasses = Sets.newSet();
         ignoredMethods = Sets.newSet();
         stmtProcessor = new StmtProcessor();
-
+        //code summary: 初始化摘要管理器
+        summaryManager = new SummaryManager(this);
+        //code summary: 加载硬编码的测试摘要规则（包括 getter/setter 和 JDK 容器方法）
+        summaryManager.initHardcodedSummaries();
+        // code summary: 将所有有摘要的方法注册为 ignored
+        // 效果：processCallEdge 中 isIgnored(method) 返回 true 时：
+        //   - addCSMethod() 跳过方法体分析（不进入 JDK 方法内部）
+        //   - 跳过参数传递和返回值的 PFG 边创建（消除指针流双重传播）
+        //   - 但 plugin.onNewCallEdge(edge) 仍然执行（在 isIgnored 判断之外）
+        //     → TransferHandler 的 taint 传播规则不受影响
+        Set<JMethod> summarizedMethods = summaryManager.getSummarizedMethods();
+        // 只注册非应用类方法为 ignored（应用类的 getter/setter 仍然需要正常分析）
+        summarizedMethods.stream()
+                .filter(m -> !m.isApplication())
+                .forEach(this::addIgnoredMethod);
+        logger.info("[code summary] Registered {} non-app summarized methods as ignored",
+                summarizedMethods.stream().filter(m -> !m.isApplication()).count());
         isTimeout = false;
         if (timeLimit != UNLIMITED) {
             timeLimiter = new TimeLimiter(timeLimit);
@@ -315,7 +332,10 @@ public class DefaultSolver implements Solver {
                         processInstanceLoad(v, diff);
                         processArrayStore(v, diff);
                         processArrayLoad(v, diff);
-                        processCall(v, diff);
+
+                        // codesummary
+                        processSummary(v, diff);
+
                         plugin.onNewPointsToSet(v, diff);
                     }
                 } else if (entry instanceof WorkList.CallEdgeEntry eEntry) {
@@ -323,7 +343,39 @@ public class DefaultSolver implements Solver {
                 }
             }
             plugin.onPhaseFinish();
+
+
+            if(workList.isEmpty()) {
+
+                //apply 摘要 遍历所有stmt 看是否能再次apply摘要
+
+                ClassHierarchy hierarchy = World.get().getClassHierarchy();
+                hierarchy.applicationClasses().forEach(c -> {
+                    c.getDeclaredMethods().forEach(jMethod -> {
+                        if (jMethod.isAbstract())
+                            return;
+                        IR method_ir = jMethod.getIR();
+
+                        List<Stmt> stmts = method_ir.getStmts();
+
+
+                        stmts.forEach(stmt -> {
+                            if (stmt instanceof Invoke il) {
+                                if (il.getInvokeExp() instanceof InvokeDynamic)
+                                    return;
+
+                                MethodRef methodRef = il.getInvokeExp().getMethodRef();
+                                //调用 summarymanager 对于methodref apply
+                                summaryManager.reapplySummary(methodRef);
+                            }
+                        });
+                    });
+                });
+            }
+
+
         }
+
         if (!workList.isEmpty() && isTimeout) {
             logger.warn("Pointer analysis stops early as it reaches time limit ({} seconds)," +
                     " and the result may be unsound!", timeLimit);
@@ -332,6 +384,9 @@ public class DefaultSolver implements Solver {
         }
         plugin.onFinish();
     }
+
+
+
     /**
      * Propagates pointsToSet to pt(pointer) and its PFG successors,
      * returns the difference set of pointsToSet and pt(pointer).
@@ -345,13 +400,17 @@ public class DefaultSolver implements Solver {
                     .filter(o -> filters.stream().allMatch(f -> f.test(o)))
                     .collect(ptsFactory::make, PointsToSet::addObject, PointsToSet::addAll);
         }
+
         PointsToSet diff = getPointsToSetOf(pointer).addAllDiff(pointsToSet);
+
         if (!diff.isEmpty()) {
             pointerFlowGraph.getOutEdgesOf(pointer).forEach(edge -> {
                 Pointer target = edge.target();
                 edge.getTransfers().forEach(transfer ->
                         addPointsTo(target, transfer.apply(edge, diff)));
             });
+
+
         }
         return diff;
     }
@@ -497,6 +556,65 @@ public class DefaultSolver implements Solver {
         }
     }
 
+    private void processSummary(CSVar recv, PointsToSet pts) {
+        Context context = recv.getContext();
+        Var var = recv.getVar();
+        for (Invoke callSite : var.getInvokes()) {
+            pts.forEach(recvObj -> {
+                // resolve callee
+                JMethod callee = CallGraphs.resolveCallee(
+                        recvObj.getObject().getType(), callSite);
+                if (callee != null) {
+                    // select context
+                    CSCallSite csCallSite = csManager.getCSCallSite(context, callSite);
+                    Context calleeContext = contextSelector.selectContext(
+                            csCallSite, recvObj, callee);
+
+                    //code summary
+                    MethodRef calleeMethodRef = callee.getRef();
+                    if (summaryManager.hasSummary(calleeMethodRef)) {
+                        //code summary: 应用摘要处理指针传播
+                        boolean applied = summaryManager.applySummary(
+                                csCallSite,calleeMethodRef , context);
+                        if (applied) {
+                            // code summary: 摘要已处理指针传播，但仍需创建 call edge
+                            // 原因：TransferHandler.onNewCallEdge() 依赖 call edge 触发
+                            //       taint transfer 规则。如果不创建 call edge，taint 传播
+                            //       将完全失效。
+                            // 流程：addCallEdge → worklist → processCallEdge:
+                            //   1. callGraph.addEdge(edge) → call graph 边保留 ✓
+                            //   2. addCSMethod → isIgnored → 跳过方法体分析 ✓
+                            //   3. isIgnored → 跳过参数/返回 PFG 边 ✓
+                            //   4. plugin.onNewCallEdge(edge) → TransferHandler 触发 ✓
+                            CSMethod csCallee = csManager.getCSMethod(calleeContext, callee);
+                            addCallEdge(new Edge<>(CallGraphs.getCallKind(callSite),
+                                    csCallSite, csCallee));
+                            // 原始代码（已注释）：
+                            // logger.info("[code summary] 应用摘要跳过: {} @ {}",
+                            //         callee.getName(), callSite);
+                            // return;  // ← 原来直接返回，不创建 call edge
+                            return;
+                        }
+                        // 无摘要 依照ProcessCall正常处理
+                    }
+
+                    // build call edge
+                    CSMethod csCallee = csManager.getCSMethod(calleeContext, callee);
+                    addCallEdge(new Edge<>(CallGraphs.getCallKind(callSite),
+                            csCallSite, csCallee));
+                    // pass receiver object to *this* variable
+                    if (!isIgnored(callee)) {
+                        addVarPointsTo(calleeContext, callee.getIR().getThis(),
+                                recvObj);
+                    }
+                } else {
+                    plugin.onUnresolvedCall(recvObj, context, callSite);
+                }
+            });
+        }
+
+
+    }
 
     private void processCallEdge(Edge<CSCallSite, CSMethod> edge) {
         if (callGraph.addEdge(edge)) {
@@ -518,7 +636,7 @@ public class DefaultSolver implements Solver {
                     // 参数数量不匹配，可能是由于方法解析错误（常见于 phantom 方法）
                     // 记录警告并跳过参数传递，避免崩溃
                     logger.warn("[processCallEdge] 参数数量不匹配！调用有 {} 个参数，但目标方法 {} 有 {} 个参数",
-                        argCount, callee.getSignature(), paramCount);
+                            argCount, callee.getSignature(), paramCount);
                     logger.warn("  调用点: {} @ {}", invokeExp, callSite);
                     logger.warn("  → 跳过参数传递以避免 IndexOutOfBoundsException");
                 } else {
@@ -706,7 +824,7 @@ public class DefaultSolver implements Solver {
                     CSVar from = csManager.getCSVar(context, cast.getValue());
                     CSVar to = csManager.getCSVar(context, stmt.getLValue());
                     addPFGEdge(new PointerFlowEdge(
-                            FlowKind.CAST, from, to),
+                                    FlowKind.CAST, from, to),
                             cast.getType());
                 }
                 return null;
@@ -921,10 +1039,17 @@ public class DefaultSolver implements Solver {
     @Override
     public PointerAnalysisResult getResult() {
         if (result == null) {
+            // //code summary: 在返回结果前，输出摘要统计信息
+            logger.info(summaryManager.getStatistics());
             result = new PointerAnalysisResultImpl(
                     propTypes, csManager, heapModel,
                     callGraph, pointerFlowGraph);
         }
         return result;
+    }
+
+    // //code summary: 获取摘要管理器（供外部插件使用）
+    public SummaryManager getSummaryManager() {
+        return summaryManager;
     }
 }
