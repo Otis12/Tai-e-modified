@@ -265,12 +265,15 @@ public class SummarySolver implements Solver {
         //   - 但 plugin.onNewCallEdge(edge) 仍然执行（在 isIgnored 判断之外）
         //     → TransferHandler 的 taint 传播规则不受影响
         Set<JMethod> summarizedMethods = summaryManager.getSummarizedMethods();
-        // 只注册非应用类方法为 ignored（应用类的 getter/setter 仍然需要正常分析）
-        summarizedMethods.stream()
-                .filter(m -> !m.isApplication())
-                .forEach(this::addIgnoredMethod);
-        logger.info("[code summary] Registered {} non-app summarized methods as ignored",
-                summarizedMethods.stream().filter(m -> !m.isApplication()).count());
+        // 对所有带摘要的方法统一走 ignored 机制：
+        //   - 非应用方法（如 JDK）用摘要替代方法体分析
+        //   - 应用类 getter/setter 也用摘要替代方法体分析，避免“方法体分析 + 摘要传播”双重开销
+        summarizedMethods.forEach(this::addIgnoredMethod);
+        long appSummarizedCount = summarizedMethods.stream()
+                .filter(JMethod::isApplication)
+                .count();
+        logger.info("[code summary] Registered {} summarized methods as ignored (app: {}, non-app: {})",
+                summarizedMethods.size(), appSummarizedCount, summarizedMethods.size() - appSummarizedCount);
         isTimeout = false;
         if (timeLimit != UNLIMITED) {
             timeLimiter = new TimeLimiter(timeLimit);
