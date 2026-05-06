@@ -28,8 +28,13 @@ import pascal.taie.analysis.pta.core.cs.element.CSCallSite;
 import pascal.taie.analysis.pta.core.cs.element.CSMethod;
 import pascal.taie.analysis.pta.core.cs.element.CSObj;
 import pascal.taie.analysis.pta.core.cs.element.CSVar;
+import pascal.taie.analysis.pta.core.solver.PointerFlowEdge;
 import pascal.taie.analysis.pta.core.solver.Solver;
+import pascal.taie.analysis.pta.plugin.container.HostMap.HostList;
+import pascal.taie.analysis.pta.plugin.container.HostMap.HostSet;
+import pascal.taie.analysis.pta.plugin.field.ParameterIndex;
 import pascal.taie.analysis.pta.pts.PointsToSet;
+import pascal.taie.ir.proginfo.FieldRef;
 import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.language.classes.JMethod;
@@ -128,5 +133,19 @@ public interface Plugin {
      * @param invoke  the invocation site
      */
     default void onUnresolvedCall(CSObj recv, Context context, Invoke invoke) {
+    }
+
+    default void onNewHostEntry(CSVar csVar, HostList.Kind kind, HostSet hostSet) {
+    }
+
+    default void onNewSetStatement(JMethod method, FieldRef fieldRef,
+                                   ParameterIndex baseIndex, ParameterIndex rhsIndex) {
+    }
+
+    default void onNewGetStatement(JMethod method, Integer lhsIndex,
+                                   ParameterIndex baseIndex, FieldRef fieldRef) {
+    }
+
+    default void onNewPFGEdge(PointerFlowEdge edge) {
     }
 }

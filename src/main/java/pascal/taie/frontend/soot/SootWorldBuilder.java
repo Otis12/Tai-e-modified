@@ -126,6 +126,13 @@ public class SootWorldBuilder extends AbstractWorldBuilder {
                 "wjtp.tai-e", new SceneTransformer() {
             @Override
             protected void internalTransform(String phaseName, Map<String, String> opts) {
+                // 在 Soot 真正运行时检测 Java 源文件模式
+                // 此时 src_prec 已经被正确设置
+                int srcPrec = soot.options.Options.v().src_prec();
+                // src_prec_java = 4, 只检查这一个值
+                boolean isJavaSource = (srcPrec == soot.options.Options.src_prec_java);
+                Converter.setJavaSourceMode(isJavaSource);
+                
                 builder.build(options, Scene.v());
             }
         });

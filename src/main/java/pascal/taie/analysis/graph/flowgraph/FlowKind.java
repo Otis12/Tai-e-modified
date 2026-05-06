@@ -39,5 +39,17 @@ public enum FlowKind {
     PARAMETER_PASSING,
     RETURN,
 
+    ARG_TO_HOST,
+    HOST_TO_RESULT,
+    SUBSET,
+    CORRELATION,
+    ARRAYCOPY,
+    ID,
+    VIRTUAL_ARRAY,
+    VIRTUAL_ARG,
+    SET,
+    GET,
+    NON_RELAY_GET,
+
     OTHER,
 }

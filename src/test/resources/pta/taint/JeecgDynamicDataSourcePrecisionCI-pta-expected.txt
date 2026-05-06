@@ -1,0 +1,2 @@
+TaintFlow{<JeecgDynamicDataSourcePrecisionCI: void main(java.lang.String[])>[11@L16] $r5 = invokestatic SourceSink.source()/result -> <JeecgDynamicDataSourcePrecisionCI: void main(java.lang.String[])>[8@L13] invokestatic SourceSink.sink($r3)/0}
+TaintFlow{<JeecgDynamicDataSourcePrecisionCI: void main(java.lang.String[])>[11@L16] $r5 = invokestatic SourceSink.source()/result -> <JeecgDynamicDataSourcePrecisionCI: void main(java.lang.String[])>[15@L18] invokestatic SourceSink.sink($r7)/0}

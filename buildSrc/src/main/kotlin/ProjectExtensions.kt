@@ -3,6 +3,7 @@ import org.gradle.api.file.RegularFile
 import org.gradle.api.internal.project.ProjectInternal
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
+import java.io.File
 import kotlin.io.path.Path
 import kotlin.io.path.exists
 import kotlin.io.path.forEachLine
@@ -61,7 +62,20 @@ val Project.javaVersion: JavaLanguageVersion
     get() = JavaLanguageVersion.of(17)
 
 val Project.javaExecutablePath: RegularFile
-    get() = (this as ProjectInternal).services.get(JavaToolchainService::class.java)
-        .launcherFor { languageVersion.set(javaVersion) }
-        .map { it.executablePath }
-        .get()
+    get() {
+        val javaHome = System.getenv("JAVA_HOME")
+        if (!javaHome.isNullOrBlank()) {
+            val executableName = if (System.getProperty("os.name").startsWith("Windows")) {
+                "java.exe"
+            } else {
+                "java"
+            }
+            return layout.file(providers.provider {
+                File(javaHome, "bin/$executableName")
+            }).get()
+        }
+        return (this as ProjectInternal).services.get(JavaToolchainService::class.java)
+            .launcherFor { languageVersion.set(javaVersion) }
+            .map { it.executablePath }
+            .get()
+    }

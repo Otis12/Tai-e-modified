@@ -10,9 +10,16 @@ repositories {
     mavenCentral()
 }
 
+val envJavaHome = providers.environmentVariable("JAVA_HOME").orNull
+
 java {
-    toolchain {
-        languageVersion.set(javaVersion)
+    if (envJavaHome.isNullOrBlank()) {
+        toolchain {
+            languageVersion.set(javaVersion)
+        }
+    } else {
+        sourceCompatibility = JavaVersion.toVersion(javaVersion.asInt())
+        targetCompatibility = JavaVersion.toVersion(javaVersion.asInt())
     }
 }
 

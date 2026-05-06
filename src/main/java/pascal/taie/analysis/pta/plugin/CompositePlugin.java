@@ -28,8 +28,13 @@ import pascal.taie.analysis.pta.core.cs.element.CSCallSite;
 import pascal.taie.analysis.pta.core.cs.element.CSMethod;
 import pascal.taie.analysis.pta.core.cs.element.CSObj;
 import pascal.taie.analysis.pta.core.cs.element.CSVar;
+import pascal.taie.analysis.pta.core.solver.PointerFlowEdge;
 import pascal.taie.analysis.pta.core.solver.Solver;
+import pascal.taie.analysis.pta.plugin.container.HostMap.HostList;
+import pascal.taie.analysis.pta.plugin.container.HostMap.HostSet;
+import pascal.taie.analysis.pta.plugin.field.ParameterIndex;
 import pascal.taie.analysis.pta.pts.PointsToSet;
+import pascal.taie.ir.proginfo.FieldRef;
 import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.language.classes.JMethod;
@@ -62,6 +67,14 @@ public class CompositePlugin implements Plugin {
 
     private final List<Plugin> onUnresolvedCallPlugins = new ArrayList<>();
 
+    private final List<Plugin> onNewPFGEdgePlugins = new ArrayList<>();
+
+    private final List<Plugin> onNewSetStatementPlugins = new ArrayList<>();
+
+    private final List<Plugin> onNewGetStatementPlugins = new ArrayList<>();
+
+    private final List<Plugin> onNewHostEntryPlugins = new ArrayList<>();
+
     public void addPlugin(Plugin... plugins) {
         for (Plugin plugin : plugins) {
             allPlugins.add(plugin);
@@ -73,6 +86,13 @@ public class CompositePlugin implements Plugin {
             addPlugin(plugin, onNewCSMethodPlugins, "onNewCSMethod", CSMethod.class);
             addPlugin(plugin, onUnresolvedCallPlugins,
                     "onUnresolvedCall", CSObj.class, Context.class, Invoke.class);
+            addPlugin(plugin, onNewPFGEdgePlugins, "onNewPFGEdge", PointerFlowEdge.class);
+            addPlugin(plugin, onNewSetStatementPlugins, "onNewSetStatement",
+                    JMethod.class, FieldRef.class, ParameterIndex.class, ParameterIndex.class);
+            addPlugin(plugin, onNewGetStatementPlugins, "onNewGetStatement",
+                    JMethod.class, Integer.class, ParameterIndex.class, FieldRef.class);
+            addPlugin(plugin, onNewHostEntryPlugins, "onNewHostEntry",
+                    CSVar.class, HostList.Kind.class, HostSet.class);
         }
     }
 
@@ -93,7 +113,9 @@ public class CompositePlugin implements Plugin {
     public void clearPlugins() {
         Stream.of(allPlugins,
                 onNewPointsToSetPlugins, onNewCallEdgePlugins, onNewMethodPlugins,
-                onNewStmtPlugins, onNewCSMethodPlugins, onUnresolvedCallPlugins
+                onNewStmtPlugins, onNewCSMethodPlugins, onUnresolvedCallPlugins,
+                onNewPFGEdgePlugins, onNewSetStatementPlugins,
+                onNewGetStatementPlugins, onNewHostEntryPlugins
         ).forEach(List::clear);
     }
 
@@ -145,5 +167,29 @@ public class CompositePlugin implements Plugin {
     @Override
     public void onUnresolvedCall(CSObj recv, Context context, Invoke invoke) {
         onUnresolvedCallPlugins.forEach(p -> p.onUnresolvedCall(recv, context, invoke));
+    }
+
+    @Override
+    public void onNewPFGEdge(PointerFlowEdge edge) {
+        onNewPFGEdgePlugins.forEach(p -> p.onNewPFGEdge(edge));
+    }
+
+    @Override
+    public void onNewSetStatement(JMethod method, FieldRef fieldRef,
+                                  ParameterIndex baseIndex, ParameterIndex rhsIndex) {
+        onNewSetStatementPlugins.forEach(
+                p -> p.onNewSetStatement(method, fieldRef, baseIndex, rhsIndex));
+    }
+
+    @Override
+    public void onNewGetStatement(JMethod method, Integer lhsIndex,
+                                  ParameterIndex baseIndex, FieldRef fieldRef) {
+        onNewGetStatementPlugins.forEach(
+                p -> p.onNewGetStatement(method, lhsIndex, baseIndex, fieldRef));
+    }
+
+    @Override
+    public void onNewHostEntry(CSVar csVar, HostList.Kind kind, HostSet hostSet) {
+        onNewHostEntryPlugins.forEach(p -> p.onNewHostEntry(csVar, kind, hostSet));
     }
 }

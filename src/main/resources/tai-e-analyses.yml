@@ -2,9 +2,13 @@
   analysisClass: pascal.taie.analysis.pta.PointerAnalysis
   id: pta
   options:
+    algorithm: default # | cutshortcut
     cs: ci # | k-[obj|type|call][-k'h]
     only-app: false # only analyze application code
     implicit-entries: true # analyze implicit entries
+    springboot-add-entrypoints: true
+    springboot-add-param-source: true
+    springboot-add-getter-callsource: false
     distinguish-string-constants: reflection # (distinguish reflection-relevant
     codesummary: codesummary
     # string constants, i.e., class, method, and field names)
@@ -15,6 +19,10 @@
     merge-string-objects: true
     merge-string-builders: true
     merge-exception-objects: true
+    summary-container-map: true
+    summary-container-list: true
+    summary-container-collection: true
+    summary-container-iterator: true
     handle-invokedynamic: false
     propagate-types: [ reference ] # ,null,int,long,...(other primitive types)
     advanced: null # specify advanced analysis:
@@ -162,3 +170,4 @@
 - description: find the method that may drop or ignore exceptions
   analysisClass: pascal.taie.analysis.bugfinder.DroppedException
   id: dropped-exception
+

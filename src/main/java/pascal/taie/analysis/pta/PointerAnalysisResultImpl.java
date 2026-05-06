@@ -34,6 +34,7 @@ import pascal.taie.analysis.pta.core.cs.element.CSManager;
 import pascal.taie.analysis.pta.core.cs.element.CSMethod;
 import pascal.taie.analysis.pta.core.cs.element.CSObj;
 import pascal.taie.analysis.pta.core.cs.element.CSVar;
+import pascal.taie.analysis.pta.core.cs.element.HostPointer;
 import pascal.taie.analysis.pta.core.cs.element.InstanceField;
 import pascal.taie.analysis.pta.core.cs.element.Pointer;
 import pascal.taie.analysis.pta.core.cs.element.StaticField;
@@ -163,6 +164,11 @@ public class PointerAnalysisResultImpl extends AbstractResultHolder
     @Override
     public Collection<CSObj> getCSObjects() {
         return csManager.getObjects();
+    }
+
+    @Override
+    public Collection<HostPointer> getHostPointers() {
+        return csManager.getHostPointers();
     }
 
     @Override

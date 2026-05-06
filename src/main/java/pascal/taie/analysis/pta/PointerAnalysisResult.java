@@ -29,6 +29,7 @@ import pascal.taie.analysis.pta.core.cs.element.CSCallSite;
 import pascal.taie.analysis.pta.core.cs.element.CSMethod;
 import pascal.taie.analysis.pta.core.cs.element.CSObj;
 import pascal.taie.analysis.pta.core.cs.element.CSVar;
+import pascal.taie.analysis.pta.core.cs.element.HostPointer;
 import pascal.taie.analysis.pta.core.cs.element.InstanceField;
 import pascal.taie.analysis.pta.core.cs.element.StaticField;
 import pascal.taie.analysis.pta.core.heap.Obj;
@@ -83,6 +84,11 @@ public interface PointerAnalysisResult extends ResultHolder {
      * @return all reachable context-sensitive objects in the program.
      */
     Collection<CSObj> getCSObjects();
+
+    /**
+     * @return all reachable host pointers in the program.
+     */
+    Collection<HostPointer> getHostPointers();
 
     /**
      * @return all reachable objects in the program.

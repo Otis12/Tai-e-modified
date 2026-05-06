@@ -62,6 +62,12 @@ public class TaintTest {
     @MultiStringsSource({"TaintInList", "cs:2-obj", TAINT_CONFIG})
     @MultiStringsSource({"BackPropagation", TAINT_CONFIG})
     @MultiStringsSource({"CSBackPropagation", "cs:1-obj", TAINT_CONFIG})
+    @MultiStringsSource({"JeecgDynamicDataSourcePrecisionCI", TAINT_CONFIG})
+    @MultiStringsSource({"JeecgDynamicDataSourcePrecision1Obj", "cs:1-obj", TAINT_CONFIG})
+    @MultiStringsSource({"JeecgDynamicDataSourcePrecision2Obj", "cs:2-obj", TAINT_CONFIG})
+    @MultiStringsSource({"DataEaseJsonPrecisionCI", TAINT_CONFIG})
+    @MultiStringsSource({"DataEaseJsonPrecision1Obj", "cs:1-obj", TAINT_CONFIG})
+    @MultiStringsSource({"DataEaseJsonPrecision2Obj", "cs:2-obj", TAINT_CONFIG})
     @MultiStringsSource({"StaticTaintTransfer",
             TAINT_CONFIG_PREFIX + "taint-config-static-taint-transfer.yml"})
     @MultiStringsSource({"InstanceSourceSink",

@@ -210,11 +210,8 @@ class MethodIRBuilder extends AbstractStmtSwitch<Void> {
         Body body = m.retrieveActiveBody();
         m.releaseActiveBody(); // release body to save memory
         varManager = new VarManager(method, converter);
-        if (method.getReturnType().equals(VOID)) {
-            returnVars = Set.of();
-        } else {
-            returnVars = Sets.newLinkedSet();
-        }
+        // 🔧 始终使用可变集合，避免方法返回类型与实际return语句不匹配时抛出UnsupportedOperationException
+        returnVars = Sets.newLinkedSet();
         stmts = new ArrayList<>();
         if (!method.isStatic()) {
             buildThis(body.getThisLocal());

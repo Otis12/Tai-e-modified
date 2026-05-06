@@ -160,6 +160,14 @@ public class SummarySolver implements Solver {
     // //code summary: 摘要管理器 - 用于注入式方法摘要
     private SummaryManager summaryManager;
 
+    private final boolean summaryGlobalReapplyFallback;
+
+    private long queryApplySummaryNanos;
+
+    private long queryReapplyNanos;
+
+    private long queryFallbackScanNanos;
+
     @SuppressWarnings("unchecked")
     public SummarySolver(AnalysisOptions options, HeapModel heapModel,
                          ContextSelector contextSelector, CSManager csManager) {
@@ -175,6 +183,8 @@ public class SummarySolver implements Solver {
                 typeSystem);
         onlyApp = options.getBoolean("only-app");
         timeLimit = options.getInt("time-limit");
+        summaryGlobalReapplyFallback = options.has("summary-global-reapply-fallback")
+                && options.getBoolean("summary-global-reapply-fallback");
     }
 
     @Override
@@ -347,36 +357,20 @@ public class SummarySolver implements Solver {
             }
             plugin.onPhaseFinish();
 
+            if (workList.isEmpty()) {
+                long queryReapplyStart = System.nanoTime();
+                summaryManager.reapplyDirtyQueryReadSites();
+                summaryManager.reapplyRegisteredQuerySummaries();
+                queryReapplyNanos += System.nanoTime() - queryReapplyStart;
 
-            if(workList.isEmpty()) {
+                summaryManager.reapplyRegisteredNonQuerySummaries();
 
-                //apply 摘要 遍历所有stmt 看是否能再次apply摘要
-
-                ClassHierarchy hierarchy = World.get().getClassHierarchy();
-                hierarchy.applicationClasses().forEach(c -> {
-                    c.getDeclaredMethods().forEach(jMethod -> {
-                        if (jMethod.isAbstract())
-                            return;
-                        IR method_ir = jMethod.getIR();
-
-                        List<Stmt> stmts = method_ir.getStmts();
-
-
-                        stmts.forEach(stmt -> {
-                            if (stmt instanceof Invoke il) {
-                                if (il.getInvokeExp() instanceof InvokeDynamic)
-                                    return;
-
-                                MethodRef methodRef = il.getInvokeExp().getMethodRef();
-                                //调用 summarymanager 对于methodref apply
-                                summaryManager.reapplySummary(methodRef);
-                            }
-                        });
-                    });
-                });
+                if (summaryGlobalReapplyFallback) {
+                    long fallbackStart = System.nanoTime();
+                    summaryManager.reapplyRegisteredSummaries();
+                    queryFallbackScanNanos += System.nanoTime() - fallbackStart;
+                }
             }
-
-
         }
 
         if (!workList.isEmpty() && isTimeout) {
@@ -405,7 +399,6 @@ public class SummarySolver implements Solver {
         }
 
         PointsToSet diff = getPointsToSetOf(pointer).addAllDiff(pointsToSet);
-
         if (!diff.isEmpty()) {
             pointerFlowGraph.getOutEdgesOf(pointer).forEach(edge -> {
                 Pointer target = edge.target();
@@ -562,24 +555,33 @@ public class SummarySolver implements Solver {
     private void processSummary(CSVar recv, PointsToSet pts) {
         Context context = recv.getContext();
         Var var = recv.getVar();
+        if (shouldDebugSummaryProbe(var)) {
+            logger.info("[summary-probe] enter processSummary recvVar={} invokes={}",
+                    var, describeInvokeTargets(var));
+        }
         for (Invoke callSite : var.getInvokes()) {
             pts.forEach(recvObj -> {
+                CSCallSite csCallSite = csManager.getCSCallSite(context, callSite);
+                debugSummaryProbe(var, callSite, recvObj, null, "before-resolve");
                 // resolve callee
                 JMethod callee = CallGraphs.resolveCallee(
                         recvObj.getObject().getType(), callSite);
-                if (callee != null) {
-                    // select context
-                    CSCallSite csCallSite = csManager.getCSCallSite(context, callSite);
-                    Context calleeContext = contextSelector.selectContext(
-                            csCallSite, recvObj, callee);
-
-                    //code summary
-                    MethodRef calleeMethodRef = callee.getRef();
-                    if (summaryManager.hasSummary(calleeMethodRef)) {
-                        //code summary: 应用摘要处理指针传播
-                        boolean applied = summaryManager.applySummary(
-                                csCallSite,calleeMethodRef , context);
-                        if (applied) {
+                debugSummaryProbe(var, callSite, recvObj, callee, "after-resolve");
+                MethodRef summaryMethodRef = callee != null
+                        ? callee.getRef()
+                        : callSite.getMethodRef();
+                if (summaryManager.hasSummary(summaryMethodRef)) {
+                    boolean isQuerySummary = summaryManager.hasQuerySummary(summaryMethodRef);
+                    long queryApplyStart = isQuerySummary ? System.nanoTime() : 0L;
+                    boolean applied = summaryManager.applySummary(
+                            csCallSite, summaryMethodRef, context);
+                    if (isQuerySummary) {
+                        queryApplySummaryNanos += System.nanoTime() - queryApplyStart;
+                    }
+                    if (applied) {
+                        if (callee != null) {
+                            Context calleeContext = contextSelector.selectContext(
+                                    csCallSite, recvObj, callee);
                             // code summary: 摘要已处理指针传播，但仍需创建 call edge
                             // 原因：TransferHandler.onNewCallEdge() 依赖 call edge 触发
                             //       taint transfer 规则。如果不创建 call edge，taint 传播
@@ -592,14 +594,20 @@ public class SummarySolver implements Solver {
                             CSMethod csCallee = csManager.getCSMethod(calleeContext, callee);
                             addCallEdge(new Edge<>(CallGraphs.getCallKind(callSite),
                                     csCallSite, csCallee));
-                            // 原始代码（已注释）：
-                            // logger.info("[code summary] 应用摘要跳过: {} @ {}",
-                            //         callee.getName(), callSite);
-                            // return;  // ← 原来直接返回，不创建 call edge
-                            return;
+                            if (!isIgnored(callee)) {
+                                // Criteria-like summaries still rely on the callee body
+                                // to expose allocations/returns, so preserve receiver flow.
+                                addVarPointsTo(calleeContext, callee.getIR().getThis(),
+                                        recvObj);
+                            }
                         }
-                        // 无摘要 依照ProcessCall正常处理
+                        return;
                     }
+                }
+                if (callee != null) {
+                    // select context
+                    Context calleeContext = contextSelector.selectContext(
+                            csCallSite, recvObj, callee);
 
                     // build call edge
                     CSMethod csCallee = csManager.getCSMethod(calleeContext, callee);
@@ -624,12 +632,24 @@ public class SummarySolver implements Solver {
             // process new call edge
             CSMethod csCallee = edge.getCallee();
             addCSMethod(csCallee);
+            CSCallSite csCallSite = edge.getCallSite();
+            Context callerCtx = csCallSite.getContext();
+            Invoke callSite = csCallSite.getCallSite();
+            JMethod callee = csCallee.getMethod();
             if (edge.getKind() != CallKind.OTHER
-                    && !isIgnored(csCallee.getMethod())) {
-                Context callerCtx = edge.getCallSite().getContext();
-                Invoke callSite = edge.getCallSite().getCallSite();
+                    && callSite != null
+                    && callSite.isStatic()
+                    && summaryManager.hasSummary(callee.getRef())) {
+                boolean isQuerySummary = summaryManager.hasQuerySummary(callee.getRef());
+                long queryApplyStart = isQuerySummary ? System.nanoTime() : 0L;
+                summaryManager.applySummary(csCallSite, callee.getRef(), callerCtx);
+                if (isQuerySummary) {
+                    queryApplySummaryNanos += System.nanoTime() - queryApplyStart;
+                }
+            }
+            if (edge.getKind() != CallKind.OTHER
+                    && !isIgnored(callee)) {
                 Context calleeCtx = csCallee.getContext();
-                JMethod callee = csCallee.getMethod();
                 InvokeExp invokeExp = callSite.getInvokeExp();
                 // pass arguments to parameters
                 // 检查参数数量是否匹配，避免 IndexOutOfBoundsException
@@ -667,6 +687,62 @@ public class SummarySolver implements Solver {
             }
             plugin.onNewCallEdge(edge);
         }
+    }
+
+    private boolean shouldDebugSummaryProbe(Var var) {
+        if (var == null || var.getMethod() == null) {
+            return false;
+        }
+        if (!SummaryDebugConfig.matchesMethod(var.getMethod())) {
+            return false;
+        }
+        if ("$r13".equals(var.getName())) {
+            return true;
+        }
+        for (Invoke invoke : var.getInvokes()) {
+            if (shouldDebugSummaryProbe(invoke)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean shouldDebugSummaryProbe(Invoke callSite) {
+        if (callSite == null || callSite.getContainer() == null) {
+            return false;
+        }
+        if (!SummaryDebugConfig.matchesMethod(callSite.getContainer())) {
+            return false;
+        }
+        return callSite.getMethodRef().getName().contains("ByExample");
+    }
+
+    private String describeInvokeTargets(Var var) {
+        StringBuilder builder = new StringBuilder("[");
+        boolean first = true;
+        for (Invoke invoke : var.getInvokes()) {
+            if (!first) {
+                builder.append(", ");
+            }
+            builder.append(invoke.getMethodRef());
+            first = false;
+        }
+        builder.append(']');
+        return builder.toString();
+    }
+
+    private void debugSummaryProbe(Var recvVar, Invoke callSite, CSObj recvObj,
+                                   JMethod callee, String phase) {
+        if (!shouldDebugSummaryProbe(callSite)) {
+            return;
+        }
+        logger.info("[summary-probe] {} recvVar={} recvObj={} invokeMethodRef={} resolvedCallee={} hasSummary={}",
+                phase,
+                recvVar,
+                recvObj.getObject(),
+                callSite.getMethodRef(),
+                callee == null ? "null" : callee.getSignature(),
+                callee != null && summaryManager.hasSummary(callee.getRef()));
     }
 
     private boolean isIgnored(JMethod method) {
@@ -1044,6 +1120,10 @@ public class SummarySolver implements Solver {
         if (result == null) {
             // //code summary: 在返回结果前，输出摘要统计信息
             logger.info(summaryManager.getStatistics());
+            logger.info("[summary-query-stats] applySummary(query)={}ms reapply(query)={}ms fallback-scan={}ms",
+                    queryApplySummaryNanos / 1_000_000.0,
+                    queryReapplyNanos / 1_000_000.0,
+                    queryFallbackScanNanos / 1_000_000.0);
             result = new PointerAnalysisResultImpl(
                     propTypes, csManager, heapModel,
                     callGraph, pointerFlowGraph);

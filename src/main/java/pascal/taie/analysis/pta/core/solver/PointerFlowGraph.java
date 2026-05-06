@@ -58,6 +58,14 @@ public class PointerFlowGraph implements Graph<Pointer> {
         return edge.source().addEdge(edge);
     }
 
+    public boolean addDirectEdge(PointerFlowEdge edge) {
+        if (edge.source().addOutEdge(edge)) {
+            edge.target().addInEdge(edge);
+            return true;
+        }
+        return false;
+    }
+
     @Override
     public Set<? extends Edge<Pointer>> getInEdgesOf(Pointer node) {
         throw new UnsupportedOperationException();

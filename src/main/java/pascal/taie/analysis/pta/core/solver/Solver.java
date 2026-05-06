@@ -36,6 +36,7 @@ import pascal.taie.analysis.pta.core.cs.selector.ContextSelector;
 import pascal.taie.analysis.pta.core.heap.HeapModel;
 import pascal.taie.analysis.pta.core.heap.Obj;
 import pascal.taie.analysis.pta.core.solver.summary.SummaryManager;
+import pascal.taie.analysis.pta.plugin.container.HostMap.HostSet;
 import pascal.taie.analysis.pta.plugin.Plugin;
 import pascal.taie.analysis.pta.pts.PointsToSet;
 import pascal.taie.config.AnalysisOptions;
@@ -63,6 +64,10 @@ public interface Solver {
     CSManager getCSManager();
 
     ContextSelector getContextSelector();
+
+    default HostSet getEmptyHostSet() {
+        return null;
+    }
 
     CallGraph<CSCallSite, CSMethod> getCallGraph();
 
@@ -137,6 +142,10 @@ public interface Solver {
         addPFGEdge(new PointerFlowEdge(kind, source, target));
     }
 
+    default void addPFGEdge(Pointer source, Pointer target, PointerFlowEdge.Kind kind) {
+        addPFGEdge(new PointerFlowEdge(kind, source, target));
+    }
+
     /**
      * Adds an edge "source -> target" to the PFG.
      * For the objects pointed to by "source", only the ones whose types
@@ -148,12 +157,22 @@ public interface Solver {
         addPFGEdge(new PointerFlowEdge(kind, source, target), type);
     }
 
+    @Deprecated
+    default void addPFGEdge(Pointer source, Pointer target, PointerFlowEdge.Kind kind, Type type) {
+        addPFGEdge(new PointerFlowEdge(kind, source, target), type);
+    }
+
     /**
      * Adds an edge "source -> target" (with edge transfer) to the PFG.
      * @deprecated Use {@link #addPFGEdge(PointerFlowEdge, Transfer)} instead.
      */
     @Deprecated
     default void addPFGEdge(Pointer source, Pointer target, FlowKind kind, Transfer transfer) {
+        addPFGEdge(new PointerFlowEdge(kind, source, target), transfer);
+    }
+
+    @Deprecated
+    default void addPFGEdge(Pointer source, Pointer target, PointerFlowEdge.Kind kind, Transfer transfer) {
         addPFGEdge(new PointerFlowEdge(kind, source, target), transfer);
     }
 

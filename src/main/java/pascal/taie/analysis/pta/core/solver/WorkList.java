@@ -26,7 +26,12 @@ import pascal.taie.analysis.graph.callgraph.Edge;
 import pascal.taie.analysis.pta.core.cs.element.CSCallSite;
 import pascal.taie.analysis.pta.core.cs.element.CSMethod;
 import pascal.taie.analysis.pta.core.cs.element.Pointer;
+import pascal.taie.analysis.pta.plugin.container.HostMap.HostList;
+import pascal.taie.analysis.pta.plugin.container.HostMap.HostSet;
+import pascal.taie.analysis.pta.plugin.field.ParameterIndex;
 import pascal.taie.analysis.pta.pts.PointsToSet;
+import pascal.taie.ir.proginfo.FieldRef;
+import pascal.taie.language.classes.JMethod;
 import pascal.taie.util.collection.Maps;
 
 import java.util.ArrayDeque;
@@ -48,6 +53,12 @@ final class WorkList {
      * Call edges to be processed.
      */
     private final Queue<Edge<CSCallSite, CSMethod>> callEdges = new ArrayDeque<>();
+
+    private final Queue<HostEntry> hostEntries = new ArrayDeque<>();
+
+    private final Queue<SetStmtEntry> setStmtEntries = new ArrayDeque<>();
+
+    private final Queue<GetStmtEntry> getStmtEntries = new ArrayDeque<>();
 
     void addEntry(Pointer pointer, PointsToSet pointsToSet) {
         PointsToSet set = pointerEntries.get(pointer);
@@ -72,13 +83,37 @@ final class WorkList {
             var e = it.next();
             it.remove();
             return new PointerEntry(e.getKey(), e.getValue());
+        } else if (!setStmtEntries.isEmpty()) {
+            return setStmtEntries.poll();
+        } else if (!getStmtEntries.isEmpty()) {
+            return getStmtEntries.poll();
+        } else if (!hostEntries.isEmpty()) {
+            return hostEntries.poll();
         } else {
             throw new NoSuchElementException();
         }
     }
 
     boolean isEmpty() {
-        return pointerEntries.isEmpty() && callEdges.isEmpty();
+        return pointerEntries.isEmpty() &&
+                callEdges.isEmpty() &&
+                hostEntries.isEmpty() &&
+                setStmtEntries.isEmpty() &&
+                getStmtEntries.isEmpty();
+    }
+
+    void addHostEntry(Pointer pointer, HostList.Kind kind, HostSet hostSet) {
+        hostEntries.add(new HostEntry(pointer, kind, hostSet));
+    }
+
+    void addSetStmtEntry(JMethod method, FieldRef fieldRef,
+                         ParameterIndex baseIndex, ParameterIndex rhsIndex) {
+        setStmtEntries.add(new SetStmtEntry(method, fieldRef, baseIndex, rhsIndex));
+    }
+
+    void addGetStmtEntry(JMethod method, int lhsIndex,
+                         ParameterIndex baseIndex, FieldRef fieldRef) {
+        getStmtEntries.add(new GetStmtEntry(method, lhsIndex, baseIndex, fieldRef));
     }
 
     interface Entry {
@@ -89,6 +124,20 @@ final class WorkList {
     }
 
     record CallEdgeEntry(Edge<CSCallSite, CSMethod> edge)
+            implements Entry {
+    }
+
+    record HostEntry(Pointer pointer, HostList.Kind kind, HostSet hostSet)
+            implements Entry {
+    }
+
+    record SetStmtEntry(JMethod method, FieldRef fieldRef,
+                        ParameterIndex baseIndex, ParameterIndex rhsIndex)
+            implements Entry {
+    }
+
+    record GetStmtEntry(JMethod method, int lhsIndex,
+                        ParameterIndex baseIndex, FieldRef fieldRef)
             implements Entry {
     }
 }

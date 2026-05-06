@@ -1,0 +1,5 @@
+sources:
+  - { kind: call, method: "<NestedCriteriaSummaryRegression$CriteriaSource: java.lang.Long source()>", index: result }
+
+sinks:
+  - { method: "<NestedCriteriaSummaryRegression$CriteriaMapper: int updateByExampleSelective(NestedCriteriaSummaryRegression$CriteriaOrder,NestedCriteriaSummaryRegression$CriteriaExample)>", index: 1 }

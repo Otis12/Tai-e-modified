@@ -62,18 +62,28 @@ public class ArrayModel extends IRModelPlugin {
     @InvokeHandler(signature = "<java.util.Arrays: java.lang.Object[] copyOf(java.lang.Object[],int)>")
     public List<Stmt> arraysCopyOf(Invoke invoke) {
         Var result = invoke.getResult();
-        return result != null
-                ? List.of(new Copy(result, invoke.getInvokeExp().getArg(0)))
-                : List.of();
+        // [javaparser debug] 添加参数数量检查
+        if (result == null || invoke.getInvokeExp().getArgCount() < 1) {
+            if (invoke.getInvokeExp().getArgCount() < 1) {
+                recordArgMismatch(invoke, "Arrays.copyOf", 1, invoke.getInvokeExp().getArgCount());
+            }
+            return List.of();
+        }
+        return List.of(new Copy(result, invoke.getInvokeExp().getArg(0)));
     }
 
     @InvokeHandler(signature = "<java.lang.System: void arraycopy(java.lang.Object,int,java.lang.Object,int,int)>")
     public List<Stmt> systemArraycopy(Invoke invoke) {
+        // [javaparser debug] 添加参数数量检查
+        List<Var> args = invoke.getInvokeExp().getArgs();
+        if (args.size() < 5) {
+            recordArgMismatch(invoke, "System.arraycopy", 5, args.size());
+            return List.of();
+        }
         JMethod container = invoke.getContainer();
         Var src = getTempVar(container, "src", objArrayType);
         Var dest = getTempVar(container, "dest", objArrayType);
         Var temp = getTempVar(container, "temp", objType);
-        List<Var> args = invoke.getInvokeExp().getArgs();
         return List.of(
                 new Cast(src, new CastExp(args.get(0), objArrayType)),
                 new Cast(dest, new CastExp(args.get(2), objArrayType)),
@@ -84,5 +94,25 @@ public class ArrayModel extends IRModelPlugin {
     private Var getTempVar(JMethod container, String name, Type type) {
         String varName = "%native-arraycopy-" + name + counter++;
         return new Var(container, varName, type, -1);
+    }
+    
+    /**
+     * [javaparser debug] 记录参数数量不匹配问题到JavaParserProblemTracker
+     */
+    private static void recordArgMismatch(Invoke invoke, String methodName, int expected, int actual) {
+        try {
+            Class<?> trackerClass = Class.forName("soot.javaparser.JavaParserProblemTracker");
+            Object tracker = trackerClass.getMethod("getInstance").invoke(null);
+            java.lang.reflect.Method recordMethod = trackerClass.getMethod(
+                "recordArgumentCountMismatch", 
+                String.class, String.class, int.class, int.class, String.class
+            );
+            
+            String invokeLocation = invoke.getContainer().getDeclaringClass().getName() + "." + 
+                                   invoke.getContainer().getName();
+            recordMethod.invoke(tracker, invokeLocation, methodName, expected, actual, "ArrayModel");
+        } catch (Exception e) {
+            // 忽略反射调用失败
+        }
     }
 }

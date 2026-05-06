@@ -54,6 +54,9 @@ import pascal.taie.language.type.VoidType;
 import pascal.taie.util.collection.Maps;
 import pascal.taie.util.collection.MultiMap;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import javax.annotation.Nullable;
 import java.util.Set;
 
@@ -76,6 +79,8 @@ import static pascal.taie.analysis.pta.plugin.util.InvokeUtils.BASE;
  * TODO: check accessibility
  */
 public class ReflectiveActionModel extends AnalysisModelPlugin {
+    
+    private static final Logger logger = LogManager.getLogger(ReflectiveActionModel.class);
 
     /**
      * Descriptor for objects created by reflective newInstance() calls.
@@ -140,8 +145,15 @@ public class ReflectiveActionModel extends AnalysisModelPlugin {
             if (constructor != null && !typeMatcher.isUnmatched(invoke, constructor)) {
                 ClassType type = constructor.getDeclaringClass().getType();
                 CSObj csNewObj = newReflectiveObj(context, invoke, type);
-                addReflectiveCallEdge(context, invoke, csNewObj,
-                        constructor, invoke.getInvokeExp().getArg(0));
+                // [javaparser debug] 检查参数数量，防止ArrayIndexOutOfBoundsException
+                Var argsVar = null;
+                if (invoke.getInvokeExp().getArgCount() > 0) {
+                    argsVar = invoke.getInvokeExp().getArg(0);
+                } else {
+                    // 记录参数不匹配问题到日志
+                    recordArgMismatch(invoke, "Constructor.newInstance", 1, 0, "constructorNewInstance");
+                }
+                addReflectiveCallEdge(context, invoke, csNewObj, constructor, argsVar);
             }
         });
     }
@@ -161,7 +173,15 @@ public class ReflectiveActionModel extends AnalysisModelPlugin {
     @InvokeHandler(signature = "<java.lang.reflect.Method: java.lang.Object invoke(java.lang.Object,java.lang.Object[])>", argIndexes = {BASE, 0})
     public void methodInvoke(Context context, Invoke invoke,
                              PointsToSet mtdObjs, PointsToSet recvObjs) {
-        Var argsVar = invoke.getInvokeExp().getArg(1);
+        // [javaparser debug] 检查参数数量，防止ArrayIndexOutOfBoundsException
+        Var argsVar = null;
+        if (invoke.getInvokeExp().getArgCount() > 1) {
+            argsVar = invoke.getInvokeExp().getArg(1);
+        } else {
+            // 记录参数不匹配问题到日志
+            recordArgMismatch(invoke, "Method.invoke", 2, invoke.getInvokeExp().getArgCount(), "methodInvoke");
+        }
+        final Var finalArgsVar = argsVar;
         mtdObjs.forEach(mtdObj -> {
             if (isInvalidTarget(invoke, mtdObj)) {
                 return;
@@ -169,10 +189,10 @@ public class ReflectiveActionModel extends AnalysisModelPlugin {
             JMethod target = CSObjs.toMethod(mtdObj);
             if (target != null && !typeMatcher.isUnmatched(invoke, target)) {
                 if (target.isStatic()) {
-                    addReflectiveCallEdge(context, invoke, null, target, argsVar);
+                    addReflectiveCallEdge(context, invoke, null, target, finalArgsVar);
                 } else {
                     recvObjs.forEach(recvObj ->
-                            addReflectiveCallEdge(context, invoke, recvObj, target, argsVar));
+                            addReflectiveCallEdge(context, invoke, recvObj, target, finalArgsVar));
                 }
             }
         });
@@ -213,6 +233,12 @@ public class ReflectiveActionModel extends AnalysisModelPlugin {
     @InvokeHandler(signature = "<java.lang.reflect.Field: void set(java.lang.Object,java.lang.Object)>", argIndexes = {BASE, 0})
     public void fieldSet(Context context, Invoke invoke,
                          PointsToSet fldObjs, PointsToSet baseObjs) {
+        // [javaparser debug] 检查参数数量，防止ArrayIndexOutOfBoundsException
+        if (invoke.getInvokeExp().getArgCount() <= 1) {
+            // 记录参数不匹配问题到日志
+            recordArgMismatch(invoke, "Field.set", 2, invoke.getInvokeExp().getArgCount(), "fieldSet");
+            return; // 参数不足，跳过
+        }
         CSVar from = csManager.getCSVar(context, invoke.getInvokeExp().getArg(1));
         fldObjs.forEach(fldObj -> {
             if (isInvalidTarget(invoke, fldObj)) {
@@ -344,6 +370,29 @@ public class ReflectiveActionModel extends AnalysisModelPlugin {
 
     private static boolean isConcerned(Type type) {
         return type instanceof ClassType || type instanceof ArrayType;
+    }
+    
+    /**
+     * [javaparser debug] 记录参数数量不匹配问题到JavaParserProblemTracker
+     */
+    private void recordArgMismatch(Invoke invoke, String targetMethod, int expected, int actual, String phase) {
+        try {
+            // 通过反射调用Soot模块的JavaParserProblemTracker
+            Class<?> trackerClass = Class.forName("soot.javaparser.JavaParserProblemTracker");
+            Object tracker = trackerClass.getMethod("getInstance").invoke(null);
+            java.lang.reflect.Method recordMethod = trackerClass.getMethod(
+                "recordArgumentCountMismatch", 
+                String.class, String.class, int.class, int.class, String.class
+            );
+            
+            String invokeLocation = invoke.getContainer().getDeclaringClass().getName() + "." + 
+                                   invoke.getContainer().getName();
+            recordMethod.invoke(tracker, invokeLocation, targetMethod, expected, actual, phase);
+        } catch (Exception e) {
+            // 如果反射调用失败，至少打印日志
+            logger.warn("[javaparser debug] Argument count mismatch in {}: {} expected {} args but got {} (phase: {})",
+                       invoke.getContainer(), targetMethod, expected, actual, phase);
+        }
     }
 
     @Override

@@ -35,12 +35,15 @@ import pascal.taie.ir.exp.Var;
  */
 public class LoadField extends FieldStmt<Var, FieldAccess> {
 
+    private boolean nonRelay;
+
     public LoadField(Var lvalue, FieldAccess rvalue) {
         super(lvalue, rvalue);
         if (rvalue instanceof InstanceFieldAccess) {
             Var base = ((InstanceFieldAccess) rvalue).getBase();
             base.addLoadField(this);
         }
+        nonRelay = false;
     }
 
     @Override
@@ -51,5 +54,13 @@ public class LoadField extends FieldStmt<Var, FieldAccess> {
     @Override
     public <T> T accept(StmtVisitor<T> visitor) {
         return visitor.visit(this);
+    }
+
+    public void disableRelay() {
+        nonRelay = true;
+    }
+
+    public boolean isNonRelay() {
+        return nonRelay;
     }
 }

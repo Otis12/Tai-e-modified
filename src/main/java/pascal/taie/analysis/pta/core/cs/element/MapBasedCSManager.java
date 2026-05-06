@@ -25,6 +25,7 @@ package pascal.taie.analysis.pta.core.cs.element;
 import pascal.taie.World;
 import pascal.taie.analysis.pta.core.cs.context.Context;
 import pascal.taie.analysis.pta.core.heap.Obj;
+import pascal.taie.analysis.pta.plugin.container.Host;
 import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.language.classes.ClassNames;
@@ -79,6 +80,11 @@ public class MapBasedCSManager implements CSManager {
     }
 
     @Override
+    public HostPointer getHostPointer(Host host, String category) {
+        return ptrManager.getHostPointer(host, category);
+    }
+
+    @Override
     public Collection<Var> getVars() {
         return ptrManager.getVars();
     }
@@ -106,6 +112,11 @@ public class MapBasedCSManager implements CSManager {
     @Override
     public Collection<ArrayIndex> getArrayIndexes() {
         return ptrManager.getArrayIndexes();
+    }
+
+    @Override
+    public Collection<HostPointer> getHostPointers() {
+        return ptrManager.getHostPointers();
     }
 
     @Override
@@ -161,6 +172,8 @@ public class MapBasedCSManager implements CSManager {
 
         private final Map<CSObj, ArrayIndex> arrayIndexes = Maps.newMap();
 
+        private final TwoKeyMap<Host, String, HostPointer> hostPointers = Maps.newTwoKeyMap();
+
         /**
          * Counter for assigning unique indexes to Pointers.
          */
@@ -184,6 +197,11 @@ public class MapBasedCSManager implements CSManager {
         private ArrayIndex getArrayIndex(CSObj array) {
             return arrayIndexes.computeIfAbsent(array,
                     a -> new ArrayIndex(a, counter++));
+        }
+
+        private HostPointer getHostPointer(Host host, String category) {
+            return hostPointers.computeIfAbsent(host, category,
+                    (h, c) -> new HostPointer(h, c, counter++));
         }
 
         private Collection<Var> getVars() {
@@ -211,12 +229,17 @@ public class MapBasedCSManager implements CSManager {
             return Collections.unmodifiableCollection(arrayIndexes.values());
         }
 
+        private Collection<HostPointer> getHostPointers() {
+            return Collections.unmodifiableCollection(hostPointers.values());
+        }
+
         private Stream<Pointer> pointers() {
             return Streams.concat(
                     getCSVars().stream(),
                     getInstanceFields().stream(),
                     getArrayIndexes().stream(),
-                    getStaticFields().stream());
+                    getStaticFields().stream(),
+                    getHostPointers().stream());
         }
     }
 

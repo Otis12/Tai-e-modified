@@ -25,14 +25,24 @@ package pascal.taie.analysis.pta.plugin.reflection;
 import pascal.taie.analysis.graph.callgraph.OtherEdge;
 import pascal.taie.analysis.pta.core.cs.element.CSCallSite;
 import pascal.taie.analysis.pta.core.cs.element.CSMethod;
+import pascal.taie.ir.exp.Exp;
 import pascal.taie.ir.exp.Var;
+import pascal.taie.language.type.ArrayType;
+import pascal.taie.language.type.NullType;
+import pascal.taie.language.type.ReferenceType;
+import pascal.taie.language.type.Type;
 
 import javax.annotation.Nullable;
 
 /**
  * Represents reflective call edges.
  */
-class ReflectiveCallEdge extends OtherEdge<CSCallSite, CSMethod> {
+public class ReflectiveCallEdge extends OtherEdge<CSCallSite, CSMethod> {
+
+    public enum ReflectiveCallKind {
+        NEW_INSTANCE,
+        METHOD_INVOKE
+    }
 
     /**
      * Variable pointing to the array argument of reflective call,
@@ -43,13 +53,44 @@ class ReflectiveCallEdge extends OtherEdge<CSCallSite, CSMethod> {
     @Nullable
     private final Var args;
 
+    private final ReflectiveCallKind reflectiveKind;
+
+    @Nullable
+    private Var virtualArg;
+
     ReflectiveCallEdge(CSCallSite csCallSite, CSMethod callee, @Nullable Var args) {
         super(csCallSite, callee);
         this.args = args;
+        this.reflectiveKind = callee.getMethod().isConstructor() ?
+                ReflectiveCallKind.NEW_INSTANCE :
+                ReflectiveCallKind.METHOD_INVOKE;
     }
 
     @Nullable
-    Var getArgs() {
+    public Var getArgs() {
         return args;
+    }
+
+    public void setVirtualArg() {
+        if (args != null && isConcerned(args) && args.getType() instanceof ArrayType arrayType) {
+            virtualArg = new Var(args.getMethod(), "VirtualArg",
+                    arrayType.elementType(), -1, true);
+        } else {
+            virtualArg = null;
+        }
+    }
+
+    @Nullable
+    public Var getVirtualArg() {
+        return virtualArg;
+    }
+
+    public ReflectiveCallKind getReflectiveKind() {
+        return reflectiveKind;
+    }
+
+    private static boolean isConcerned(Exp exp) {
+        Type type = exp.getType();
+        return type instanceof ReferenceType && !(type instanceof NullType);
     }
 }

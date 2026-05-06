@@ -1,0 +1,58 @@
+=============================================================
+  JavaParser/Taie Problem Report
+  Generated: 2026-04-29T18:30:03.0947627
+=============================================================
+
+JavaParser Problems Summary:
+  Parse Errors: 0
+  Type Resolution Errors: 0
+  Method Call Errors: 0
+  Field Errors: 0
+  Unsupported Expressions: 0
+  Unsupported Types: 0
+  Method Overload Mismatches: 0
+  Missing ActiveBody: 8
+  Control Flow Errors: 0
+  Argument Count Mismatches: 0
+  Taie Conversion Errors: 0
+  Soot Errors: 0
+  Total: 8
+
+=============================================================
+  DETAILED PROBLEMS
+=============================================================
+
+--- Methods Without ActiveBody (8) ---
+
+Class: javax.servlet.ServletRequest
+Context: <javax.servlet.ServletRequest: void setAttribute(java.lang.String,java.lang.Object)>
+Error: Method has no ActiveBody: ABSTRACT_METHOD
+
+Class: javax.servlet.ServletRequest
+Context: <javax.servlet.ServletRequest: java.lang.Object getAttribute(java.lang.String)>
+Error: Method has no ActiveBody: ABSTRACT_METHOD
+
+Class: javax.servlet.http.HttpSession
+Context: <javax.servlet.http.HttpSession: void setAttribute(java.lang.String,java.lang.Object)>
+Error: Method has no ActiveBody: ABSTRACT_METHOD
+
+Class: javax.servlet.http.HttpSession
+Context: <javax.servlet.http.HttpSession: java.lang.Object getAttribute(java.lang.String)>
+Error: Method has no ActiveBody: ABSTRACT_METHOD
+
+Class: jakarta.servlet.ServletRequest
+Context: <jakarta.servlet.ServletRequest: void setAttribute(java.lang.String,java.lang.Object)>
+Error: Method has no ActiveBody: ABSTRACT_METHOD
+
+Class: jakarta.servlet.ServletRequest
+Context: <jakarta.servlet.ServletRequest: java.lang.Object getAttribute(java.lang.String)>
+Error: Method has no ActiveBody: ABSTRACT_METHOD
+
+Class: jakarta.servlet.http.HttpSession
+Context: <jakarta.servlet.http.HttpSession: void setAttribute(java.lang.String,java.lang.Object)>
+Error: Method has no ActiveBody: ABSTRACT_METHOD
+
+Class: jakarta.servlet.http.HttpSession
+Context: <jakarta.servlet.http.HttpSession: java.lang.Object getAttribute(java.lang.String)>
+Error: Method has no ActiveBody: ABSTRACT_METHOD
+

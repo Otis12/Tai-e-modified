@@ -24,7 +24,13 @@ package pascal.taie.analysis.pta.core.cs.element;
 
 import pascal.taie.analysis.pta.core.cs.context.Context;
 import pascal.taie.ir.exp.Var;
+import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.language.type.Type;
+import pascal.taie.util.collection.Pair;
+import pascal.taie.util.collection.Sets;
+
+import java.util.Collections;
+import java.util.Set;
 
 /**
  * Represents context-sensitive variables.
@@ -34,6 +40,8 @@ public class CSVar extends AbstractPointer implements CSElement {
     private final Var var;
 
     private final Context context;
+
+    private final Set<Pair<Invoke, String>> mustRelatedInvokes = Sets.newSet();
 
     CSVar(Var var, Context context, int index) {
         super(index);
@@ -56,6 +64,14 @@ public class CSVar extends AbstractPointer implements CSElement {
     @Override
     public Type getType() {
         return var.getType();
+    }
+
+    public void addMustRelatedInvoke(Invoke invoke, String category) {
+        mustRelatedInvokes.add(new Pair<>(invoke, category));
+    }
+
+    public Set<Pair<Invoke, String>> getMustRelatedInvokes() {
+        return Collections.unmodifiableSet(mustRelatedInvokes);
     }
 
     @Override

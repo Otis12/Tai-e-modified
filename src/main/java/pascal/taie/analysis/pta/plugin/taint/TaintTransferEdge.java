@@ -34,7 +34,7 @@ public class TaintTransferEdge extends OtherEdge {
         this.transfer = transfer;
     }
 
-    TaintTransfer getTransfer() {
+    public TaintTransfer getTaintTransfer() {
         return transfer;
     }
 }

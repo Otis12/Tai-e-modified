@@ -22,6 +22,9 @@
 
 package pascal.taie.ir.exp;
 
+import pascal.taie.analysis.pta.plugin.field.AbstractLoadField;
+import pascal.taie.analysis.pta.plugin.field.AbstractStoreField;
+import pascal.taie.analysis.pta.plugin.field.ParameterIndex;
 import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.ir.stmt.LoadArray;
 import pascal.taie.ir.stmt.LoadField;
@@ -75,6 +78,12 @@ public class Var implements LValue, RValue, Indexable {
      */
     private final Literal constValue;
 
+    private final boolean virtual;
+
+    private boolean isDefined;
+
+    private ParameterIndex parameterIndex;
+
     /**
      * Relevant statements of this variable.
      * <br>
@@ -90,13 +99,23 @@ public class Var implements LValue, RValue, Indexable {
         this(method, name, type, index, null);
     }
 
+    public Var(JMethod method, String name, Type type, int index, boolean virtual) {
+        this(method, name, type, index, null, virtual);
+    }
+
     public Var(JMethod method, String name, Type type, int index,
-               @Nullable Literal constValue) {
+               @Nullable Literal constValue, boolean virtual) {
         this.method = method;
         this.name = name;
         this.type = type;
         this.index = index;
         this.constValue = constValue;
+        this.virtual = virtual;
+    }
+
+    public Var(JMethod method, String name, Type type, int index,
+               @Nullable Literal constValue) {
+        this(method, name, type, index, constValue, false);
     }
 
     /**
@@ -126,6 +145,10 @@ public class Var implements LValue, RValue, Indexable {
         return type;
     }
 
+    public boolean isVirtual() {
+        return virtual;
+    }
+
     /**
      * @return true if this variable is a (temporary) variable
      * generated for holding constant value, otherwise false.
@@ -144,6 +167,22 @@ public class Var implements LValue, RValue, Indexable {
                     + " is not a (temporary) variable for holding const value");
         }
         return constValue;
+    }
+
+    public void setDefined() {
+        isDefined = true;
+    }
+
+    public boolean isDefined() {
+        return isDefined;
+    }
+
+    public void setParameterIndex(ParameterIndex index) {
+        parameterIndex = index;
+    }
+
+    public ParameterIndex getParameterIndex() {
+        return parameterIndex;
     }
 
     @Override
@@ -216,6 +255,24 @@ public class Var implements LValue, RValue, Indexable {
         return relevantStmts.getInvokes();
     }
 
+    public void addAbstractLoadField(AbstractLoadField abstractLoadField) {
+        ensureRelevantStmts();
+        relevantStmts.addAbstractLoadField(abstractLoadField);
+    }
+
+    public List<AbstractLoadField> getAbstractLoadFields() {
+        return relevantStmts.getAbstractLoadFields();
+    }
+
+    public void addAbstractStoreField(AbstractStoreField abstractStoreField) {
+        ensureRelevantStmts();
+        relevantStmts.addAbstractStoreField(abstractStoreField);
+    }
+
+    public List<AbstractStoreField> getAbstractStoreFields() {
+        return relevantStmts.getAbstractStoreFields();
+    }
+
     /**
      * Ensure {@link #relevantStmts} points to an instance other than
      * {@link RelevantStmts#EMPTY}.
@@ -272,6 +329,30 @@ public class Var implements LValue, RValue, Indexable {
         private List<LoadArray> loadArrays = List.of();
         private List<StoreArray> storeArrays = List.of();
         private List<Invoke> invokes = List.of();
+        private List<AbstractLoadField> abstractLoadFields = List.of();
+        private List<AbstractStoreField> abstractStoreFields = List.of();
+
+        private List<AbstractLoadField> getAbstractLoadFields() {
+            return unmodifiable(abstractLoadFields);
+        }
+
+        private void addAbstractLoadField(AbstractLoadField abstractLoadField) {
+            if (abstractLoadFields.isEmpty()) {
+                abstractLoadFields = new ArrayList<>();
+            }
+            abstractLoadFields.add(abstractLoadField);
+        }
+
+        private List<AbstractStoreField> getAbstractStoreFields() {
+            return unmodifiable(abstractStoreFields);
+        }
+
+        private void addAbstractStoreField(AbstractStoreField abstractStoreField) {
+            if (abstractStoreFields.isEmpty()) {
+                abstractStoreFields = new ArrayList<>();
+            }
+            abstractStoreFields.add(abstractStoreField);
+        }
 
         private List<LoadField> getLoadFields() {
             return unmodifiable(loadFields);

@@ -22,6 +22,8 @@
 
 package pascal.taie.frontend.soot;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import pascal.taie.ir.proginfo.FieldRef;
 import pascal.taie.ir.proginfo.MethodRef;
 import pascal.taie.language.annotation.Annotation;
@@ -108,10 +110,40 @@ import static pascal.taie.util.collection.Maps.newConcurrentMap;
  * Converts Soot classes to Tai-e's representation.
  */
 public class Converter {
+    //javaparser debug
+    private static final Logger logger = LoggerFactory.getLogger(Converter.class);
 
     private final JClassLoader loader;
 
     private final TypeSystem typeSystem;
+
+    /**
+     * 标记当前是否使用 JavaParser 处理 Java 源文件。
+     * 由 Soot 前端在初始化时设置。
+     */
+    private static volatile boolean javaSourceMode = false;
+
+    /**
+     * 设置 Java 源文件模式标志。
+     * 应在 Soot 初始化时调用。
+     *
+     * @param enabled true 表示正在处理 Java 源文件
+     */
+    public static void setJavaSourceMode(boolean enabled) {
+        javaSourceMode = enabled;
+        logger.info("Converter: Java source mode set to {}", enabled);
+    }
+
+    /**
+     * Check if the current Soot processing mode is using Java source files (JavaParser mode).
+     * When processing Java source files via JavaParser, field resolution may fail due to
+     * phantom field type mismatches. This method allows conditional handling of such cases.
+     *
+     * @return true if processing Java source files
+     */
+    public static boolean isJavaSourceMode() {
+        return javaSourceMode;
+    }
 
     // Following four maps may be concurrently written during IR construction,
     // thus we use concurrent map to ensure their thread-safety.
@@ -198,6 +230,62 @@ public class Converter {
                     sootMethod
             );
         });
+
+        //javaparser debug start
+//        return methodMap.computeIfAbsent(sootMethod, m -> {
+//            try {
+//                logger.debug("javaparser debug: Taie convertMethod() 开始转换: {}", m.getSignature());
+//
+//                List<Type> paramTypes = Lists.map(
+//                        m.getParameterTypes(), this::convertType);
+//                logger.debug("javaparser debug: 参数类型转换完成: {} 个参数", paramTypes.size());
+//
+//                Type returnType = convertType(m.getReturnType());
+//                logger.debug("  返回类型转换完成: {}", returnType);
+//
+//                List<ClassType> exceptions = Lists.map(
+//                        m.getExceptions(),
+//                        sc -> (ClassType) convertType(sc.getType()));
+//                logger.debug("  异常列表转换完成: {} 个异常", exceptions.size());
+//
+//                // TODO: convert attributes
+//                JMethod jMethod = new JMethod(convertClass(m.getDeclaringClass()),
+//                        m.getName(), Modifiers.convert(m.getModifiers()),
+//                        paramTypes, returnType, exceptions,
+//                        convertGSignature(sootMethod),
+//                        convertAnnotations(sootMethod),
+//                        convertParamAnnotations(sootMethod),
+//                        convertParamNames(sootMethod),
+//                        sootMethod
+//                );
+//                logger.debug("  convertMethod() 成功: {}", m.getSignature());
+//                return jMethod;
+//            } catch (Exception e) {
+//                // 记录到问题跟踪器
+//                try {
+//                    soot.javaparser.JavaParserProblemTracker.getInstance()
+//                        .recordTaieConversionError(
+//                            m.getDeclaringClass().getName(),
+//                            m.getSignature(),
+//                            e.getMessage(),
+//                            getStackTraceString(e)
+//                        );
+//                } catch (Throwable ignored) {
+//                    // 忽略问题跟踪器可能的错误，不影响主流程
+//                }
+//
+//                logger.warn("convertMethod() 转换失败: {} - {}", m.getSignature(), e.getMessage());
+//                throw new RuntimeException("Failed to convert method: " + m.getSignature(), e);
+//            }
+//        });
+        //javaparser debug end
+
+    }
+
+    private static String getStackTraceString(Throwable e) {
+        java.io.StringWriter sw = new java.io.StringWriter();
+        e.printStackTrace(new java.io.PrintWriter(sw));
+        return sw.toString();
     }
 
     FieldRef convertFieldRef(SootFieldRef sootFieldRef) {
@@ -253,6 +341,24 @@ public class Converter {
      */
     static AnnotationHolder convertAnnotations(AbstractHost host) {
         var tag = (VisibilityAnnotationTag) host.getTag(VisibilityAnnotationTag.NAME);
+        // Debug: 检查 Mybatis 相关的注解
+        if (host instanceof SootMethod) {
+            SootMethod m = (SootMethod) host;
+            if (m.getDeclaringClass().getName().contains("Mapper") ||
+                m.getDeclaringClass().getName().contains("Dao")) {
+                logger.debug("DEBUG: Checking annotations for method: {}", m.getSignature());
+                logger.debug("  - VisibilityAnnotationTag: {}", tag);
+                if (tag != null && tag.getAnnotations() != null) {
+                    for (AnnotationTag at : tag.getAnnotations()) {
+                        logger.debug("  - AnnotationTag type: {}, elems count: {}", at.getType(), at.getElems().size());
+                        for (var elem : at.getElems()) {
+                            logger.debug("    - Elem: name='{}', kind='{}', class={}",
+                                elem.getName(), elem.getKind(), elem.getClass().getSimpleName());
+                        }
+                    }
+                }
+            }
+        }
         return convertAnnotations(tag);
     }
 
@@ -279,9 +385,20 @@ public class Converter {
         tag.getElems().forEach(e -> {
             String name = e.getName();
             Element elem = convertAnnotationElement(e);
+            // Debug: 检查 Mybatis 注解元素
+            if (annotationType.contains("ibatis")) {
+                logger.debug("Converting Mybatis annotation element: name='{}', elem={}, elemType={}",
+                    name, elem, (elem != null ? elem.getClass().getSimpleName() : "null"));
+            }
             elements.put(name, elem);
         });
-        return new Annotation(annotationType, elements);
+        Annotation result = new Annotation(annotationType, elements);
+        // Debug: 检查 Mybatis 注解结果
+        if (annotationType.contains("ibatis")) {
+            logger.debug("Converted Mybatis annotation: type={}, elementsSize={}, elements={}",
+                annotationType, elements.size(), elements);
+        }
+        return result;
     }
 
     private static Element convertAnnotationElement(AnnotationElem elem) {
@@ -336,8 +453,16 @@ public class Converter {
         // the annotations for all parameters in the SootMethod
         var tag = (VisibilityParameterAnnotationTag)
                 sootMethod.getTag(VisibilityParameterAnnotationTag.NAME);
-        return tag == null ? null :
-                Lists.map(tag.getVisibilityAnnotations(), Converter::convertAnnotations);
+        // ✅ Fix: tag.getVisibilityAnnotations() can return null when processed by JavaParser
+        // This happens when the tag exists but has no actual annotations
+        if (tag == null) {
+            return null;
+        }
+        var visibilityAnnotations = tag.getVisibilityAnnotations();
+        if (visibilityAnnotations == null) {
+            return null;
+        }
+        return Lists.map(visibilityAnnotations, Converter::convertAnnotations);
     }
 
     /**
@@ -366,3 +491,4 @@ public class Converter {
         return null;
     }
 }
+

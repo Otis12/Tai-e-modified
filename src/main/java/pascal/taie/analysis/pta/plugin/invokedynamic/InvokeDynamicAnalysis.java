@@ -377,6 +377,11 @@ public class InvokeDynamicAnalysis implements Plugin {
             case REF_invokeVirtual -> {
                 // for virtual invocation, record base variable and
                 // add invokedynamic call edge
+                // [javaparser debug] 添加参数数量检查
+                if (invoke.getInvokeExp().getArgCount() < 1) {
+                    recordArgMismatch(invoke, "InvokeDynamic.REF_invokeVirtual", 1, 0);
+                    return;
+                }
                 Var base = invoke.getInvokeExp().getArg(0);
                 base2Indys.put(base, invoke);
                 contexts.forEach(ctx -> {
@@ -440,6 +445,26 @@ public class InvokeDynamicAnalysis implements Plugin {
                     addInvokeDynamicCallEdge(context, indy, null, mh);
                 }
             }
+        }
+    }
+    
+    /**
+     * [javaparser debug] 记录参数数量不匹配问题到JavaParserProblemTracker
+     */
+    private static void recordArgMismatch(Invoke invoke, String methodName, int expected, int actual) {
+        try {
+            Class<?> trackerClass = Class.forName("soot.javaparser.JavaParserProblemTracker");
+            Object tracker = trackerClass.getMethod("getInstance").invoke(null);
+            java.lang.reflect.Method recordMethod = trackerClass.getMethod(
+                "recordArgumentCountMismatch", 
+                String.class, String.class, int.class, int.class, String.class
+            );
+            
+            String invokeLocation = invoke.getContainer().getDeclaringClass().getName() + "." + 
+                                   invoke.getContainer().getName();
+            recordMethod.invoke(tracker, invokeLocation, methodName, expected, actual, "InvokeDynamicAnalysis");
+        } catch (Exception e) {
+            // 忽略反射调用失败
         }
     }
 }

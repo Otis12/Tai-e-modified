@@ -1,0 +1,2 @@
+TaintFlow{<DataEaseJsonPrecision1Obj: void main(java.lang.String[])>[8@L11] $r3 = invokestatic SourceSink.source()/result -> <DataEaseJsonPrecision1Obj: void main(java.lang.String[])>[5@L8] invokestatic SourceSink.sink($r1)/0}
+TaintFlow{<DataEaseJsonPrecision1Obj: void main(java.lang.String[])>[8@L11] $r3 = invokestatic SourceSink.source()/result -> <DataEaseJsonPrecision1Obj: void main(java.lang.String[])>[11@L12] invokestatic SourceSink.sink($r4)/0}

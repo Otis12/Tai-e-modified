@@ -22,6 +22,8 @@
 
 package pascal.taie.frontend.soot;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import pascal.taie.language.annotation.AnnotationHolder;
 import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JClassBuilder;
@@ -47,6 +49,9 @@ class SootClassBuilder implements JClassBuilder {
     private final Converter converter;
 
     private final SootClass sootClass;
+
+    private static final Logger logger = LoggerFactory.getLogger(SootClassBuilder.class);
+
 
     SootClassBuilder(Converter converter, SootClass sootClass) {
         this.converter = converter;
@@ -78,7 +83,16 @@ class SootClassBuilder implements JClassBuilder {
         if (sootClass.getName().equals(OBJECT)) {
             return null;
         } else {
-            return converter.convertClass(sootClass.getSuperclass());
+            soot.SootClass sootSuperClass = sootClass.getSuperclass();
+//            // [修复] 检测循环继承
+//            if (sootSuperClass == null) {
+//                return null;
+//            }
+            if (sootSuperClass.getName().equals(sootClass.getName())) {
+                logger.error("[JavaParser调试] 检测到类的父类指向自身: {}", sootClass.getName());
+                return null;
+            }
+            return converter.convertClass(sootSuperClass);
         }
     }
 
@@ -102,6 +116,15 @@ class SootClassBuilder implements JClassBuilder {
     @Override
     public Collection<JMethod> getDeclaredMethods() {
         return Lists.map(sootClass.getMethods(), converter::convertMethod);
+        //javaparser debug start
+//        logger.debug("SootClassBuilder.getDeclaredMethods() 开始处理: {}", sootClass.getName());
+//        logger.debug("  sootClass.getMethods().size() = {}", sootClass.getMethods().size());
+//        Collection<JMethod> result = Lists.map(sootClass.getMethods(), converter::convertMethod);
+//        logger.debug("SootClassBuilder.getDeclaredMethods() 完成: {} -> 转换了 {} 个方法",
+//                sootClass.getName(), result.size());
+//        return result;
+
+        //javaparser debug end
     }
 
     @Override
@@ -130,3 +153,4 @@ class SootClassBuilder implements JClassBuilder {
         return null;
     }
 }
+

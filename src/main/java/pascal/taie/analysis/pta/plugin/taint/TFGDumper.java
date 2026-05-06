@@ -152,7 +152,7 @@ public class TFGDumper extends DotDumper<Node> {
                     // dump raw taint transfer entry of each taint transfer
                     // edge for better understandability
                     yield DotAttributes.of("color", "green3", "style", "dashed",
-                            "label", quoted(e.getTransfer()));
+                            "label", quoted(e.getTaintTransfer()));
                 } else {
                     yield DotAttributes.of("color", "green3", "style", "dashed");
                 }

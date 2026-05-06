@@ -24,6 +24,7 @@ package pascal.taie.analysis.pta.core.cs.element;
 
 import pascal.taie.analysis.graph.flowgraph.FlowKind;
 import pascal.taie.analysis.pta.core.solver.PointerFlowEdge;
+import pascal.taie.analysis.pta.plugin.container.HostMap.HostList;
 import pascal.taie.analysis.pta.pts.PointsToSet;
 import pascal.taie.language.type.Type;
 import pascal.taie.util.Indexable;
@@ -56,6 +57,10 @@ public interface Pointer extends Indexable {
      * Sets the associated points-to set of this pointer.
      */
     void setPointsToSet(PointsToSet pointsToSet);
+
+    default HostList getHostList() {
+        return new HostList();
+    }
 
     /**
      * Adds filter to filter out objects pointed to by this pointer.
@@ -97,6 +102,14 @@ public interface Pointer extends Indexable {
      */
     PointerFlowEdge addEdge(PointerFlowEdge edge);
 
+    default boolean addOutEdge(PointerFlowEdge edge) {
+        return addEdge(edge) != null;
+    }
+
+    default boolean addInEdge(PointerFlowEdge edge) {
+        return true;
+    }
+
     /**
      * Removes out edges of this pointer if they satisfy the filter.
      * <p>
@@ -111,6 +124,10 @@ public interface Pointer extends Indexable {
      * @return out edges of this pointer in pointer flow graph.
      */
     Set<PointerFlowEdge> getOutEdges();
+
+    default Set<PointerFlowEdge> getInEdges() {
+        return Set.of();
+    }
 
     /**
      * @return out degree of this pointer in pointer flow graph.

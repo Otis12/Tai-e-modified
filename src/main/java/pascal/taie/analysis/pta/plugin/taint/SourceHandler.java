@@ -168,21 +168,18 @@ public class SourceHandler extends OnFlyHandler {
     public void onNewStmt(Stmt stmt, JMethod container) {
         if (handleFieldSources && stmt instanceof LoadField loadField) {
             // Handle field sources.
-            // If a {@link LoadField} loads any source fields,
-            // then records the {@link LoadField} statements.
+            //javaparser debug: resolveNullable 避免解析失败
             JField field = loadField.getFieldRef().resolveNullable();
-            if (fieldSources.containsKey(field)) {
+            if (field != null && fieldSources.containsKey(field)) {
                 loadedFieldSources.put(container, loadField);
             }
         }
         if (callSiteMode &&
                 stmt instanceof Invoke invoke &&
                 !invoke.isDynamic()) {
-            // Handles call sources for the case when call-site mode is enabled.
-            // If method references of any {@link Invoke}s are resolved to
-            // call source method, then records the {@link Invoke} statements.
+            //javaparser debug: resolveNullable 避免解析失败
             JMethod callee = invoke.getMethodRef().resolveNullable();
-            if (callSources.containsKey(callee)) {
+            if (callee != null && callSources.containsKey(callee)) {
                 callSiteSources.put(container, invoke);
             }
         }
@@ -229,8 +226,11 @@ public class SourceHandler extends OnFlyHandler {
             Context context = csMethod.getContext();
             loads.forEach(load -> {
                 Var lhs = load.getLValue();
-                JField field = load.getFieldRef().resolve();
+                //javaparser debug: resolveNullable 避免解析失败
+                JField field = load.getFieldRef().resolveNullable();
+                if (field == null) return;
                 FieldSource fieldSrc = fieldSources.get(field);
+                if (fieldSrc == null) return;
                 SourcePoint sourcePoint = new FieldSourcePoint(method, load, fieldSrc);
                 Obj taint = manager.makeTaint(sourcePoint, fieldSrc.type());
                 solver.addVarPointsTo(context, lhs, taint);
@@ -248,7 +248,9 @@ public class SourceHandler extends OnFlyHandler {
         if (!callSites.isEmpty()) {
             Context context = csMethod.getContext();
             callSites.forEach(callSite -> {
-                JMethod callee = callSite.getMethodRef().resolve();
+                //javaparser debug: 使用 resolveNullable 避免解析失败
+                JMethod callee = callSite.getMethodRef().resolveNullable();
+                if (callee == null) return;
                 callSources.get(callee).forEach(source ->
                         processCallSource(context, callSite, source));
             });

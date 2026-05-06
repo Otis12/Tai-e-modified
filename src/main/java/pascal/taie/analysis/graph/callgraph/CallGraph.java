@@ -94,6 +94,10 @@ public interface CallGraph<CallSite, Method>
      */
     Stream<Method> entryMethods();
 
+    default boolean isEntry(Method method) {
+        return entryMethods().anyMatch(method::equals);
+    }
+
     /**
      * @return all reachable methods in this call graph.
      */

@@ -24,6 +24,7 @@ package pascal.taie.analysis.pta.core.cs.element;
 
 import pascal.taie.analysis.graph.flowgraph.FlowKind;
 import pascal.taie.analysis.pta.core.solver.PointerFlowEdge;
+import pascal.taie.analysis.pta.plugin.container.HostMap.HostList;
 import pascal.taie.analysis.pta.pts.PointsToSet;
 import pascal.taie.util.collection.ArraySet;
 import pascal.taie.util.collection.HybridIndexableSet;
@@ -39,11 +40,17 @@ abstract class AbstractPointer implements Pointer {
 
     private PointsToSet pointsToSet;
 
+    private final HostList hostList = new HostList();
+
     private final int index;
 
     private final Set<Pointer> successors = new HybridIndexableSet<>(true);
 
+    private final Set<Pointer> predecessors = new HybridIndexableSet<>(true);
+
     private final ArrayList<PointerFlowEdge> outEdges = new ArrayList<>(4);
+
+    private final ArrayList<PointerFlowEdge> inEdges = new ArrayList<>(4);
 
     private Set<Predicate<CSObj>> filters = Set.of();
 
@@ -64,6 +71,11 @@ abstract class AbstractPointer implements Pointer {
     @Override
     public void setPointsToSet(PointsToSet pointsToSet) {
         this.pointsToSet = pointsToSet;
+    }
+
+    @Override
+    public HostList getHostList() {
+        return hostList;
     }
 
     @Override
@@ -109,6 +121,26 @@ abstract class AbstractPointer implements Pointer {
     }
 
     @Override
+    public boolean addOutEdge(PointerFlowEdge edge) {
+        if (outEdges.contains(edge)) {
+            return false;
+        }
+        successors.add(edge.target());
+        outEdges.add(edge);
+        return true;
+    }
+
+    @Override
+    public boolean addInEdge(PointerFlowEdge edge) {
+        if (inEdges.contains(edge)) {
+            return false;
+        }
+        predecessors.add(edge.source());
+        inEdges.add(edge);
+        return true;
+    }
+
+    @Override
     public void removeEdgesIf(Predicate<PointerFlowEdge> filter) {
         outEdges.removeIf(filter);
     }
@@ -116,6 +148,11 @@ abstract class AbstractPointer implements Pointer {
     @Override
     public Set<PointerFlowEdge> getOutEdges() {
         return Collections.unmodifiableSet(new ArraySet<>(outEdges, true));
+    }
+
+    @Override
+    public Set<PointerFlowEdge> getInEdges() {
+        return Collections.unmodifiableSet(new ArraySet<>(inEdges, true));
     }
 
     @Override

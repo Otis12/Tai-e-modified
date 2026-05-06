@@ -30,6 +30,7 @@ import pascal.taie.analysis.pta.core.cs.selector.ContextSelector;
 import pascal.taie.analysis.pta.core.cs.selector.ContextSelectorFactory;
 import pascal.taie.analysis.pta.core.heap.AllocationSiteBasedModel;
 import pascal.taie.analysis.pta.core.heap.HeapModel;
+import pascal.taie.analysis.pta.core.solver.CutShortcutSolver;
 import pascal.taie.analysis.pta.core.solver.DefaultSolver;
 import pascal.taie.analysis.pta.core.solver.Solver;
 import pascal.taie.analysis.pta.core.solver.SummarySolver;
@@ -41,10 +42,14 @@ import pascal.taie.analysis.pta.plugin.Plugin;
 import pascal.taie.analysis.pta.plugin.ReferenceHandler;
 import pascal.taie.analysis.pta.plugin.ResultProcessor;
 import pascal.taie.analysis.pta.plugin.ThreadHandler;
+import pascal.taie.analysis.pta.plugin.container.ContainerAccessHandler;
+import pascal.taie.analysis.pta.plugin.container.MakeDefaultContainerConfig;
 import pascal.taie.analysis.pta.plugin.exception.ExceptionAnalysis;
+import pascal.taie.analysis.pta.plugin.field.FieldAccessHandler;
 import pascal.taie.analysis.pta.plugin.invokedynamic.InvokeDynamicAnalysis;
 import pascal.taie.analysis.pta.plugin.invokedynamic.Java9StringConcatHandler;
 import pascal.taie.analysis.pta.plugin.invokedynamic.LambdaAnalysis;
+import pascal.taie.analysis.pta.plugin.localflow.LocalFlowHandler;
 import pascal.taie.analysis.pta.plugin.natives.NativeModeller;
 import pascal.taie.analysis.pta.plugin.reflection.ReflectionAnalysis;
 import pascal.taie.analysis.pta.plugin.taint.TaintAnalysis;
@@ -78,6 +83,7 @@ public class PointerAnalysis extends ProgramAnalysis<PointerAnalysisResult> {
         String advanced = options.getString("advanced");
         String cs = options.getString("cs");
         String codesummary = options.getString("codesummary");
+        String algorithm = options.getString("algorithm");
 //        String codesummary = "1";
 
         if (advanced != null) {
@@ -87,7 +93,7 @@ public class PointerAnalysis extends ProgramAnalysis<PointerAnalysisResult> {
             } else {
                 // run context-insensitive analysis as pre-analysis
                 PointerAnalysisResult preResult = runAnalysis(heapModel,
-                        ContextSelectorFactory.makeCISelector(), codesummary);
+                        ContextSelectorFactory.makeCISelector(), codesummary, algorithm);
                 if (advanced.startsWith("scaler")) {
                     selector = Timer.runAndCount(() -> ContextSelectorFactory
                                     .makeGuidedSelector(Scaler.run(preResult, advanced)),
@@ -110,29 +116,33 @@ public class PointerAnalysis extends ProgramAnalysis<PointerAnalysisResult> {
         if (selector == null) {
             selector = ContextSelectorFactory.makePlainSelector(cs);
         }
-        return runAnalysis(heapModel, selector, codesummary);
+        return runAnalysis(heapModel, selector, codesummary, algorithm);
     }
 
     private PointerAnalysisResult runAnalysis(HeapModel heapModel,
-                                              ContextSelector selector, String codesummary) {
+                                              ContextSelector selector,
+                                              String codesummary,
+                                              String algorithm) {
         AnalysisOptions options = getOptions();
         Solver solver;
         // The initialization of some Plugins may read the fields in solver,
         // e.g., contextSelector or csManager, thus we initialize Plugins
         // after setting all other fields of solver.
 
-        if(codesummary.equals("codesummary")) {
+        if ("cutshortcut".equals(algorithm)) {
+            solver = new CutShortcutSolver(options, heapModel, selector, new MapBasedCSManager());
+        } else if(codesummary.equals("codesummary")) {
             solver = new SummarySolver(options, heapModel, selector, new MapBasedCSManager());
         } else {
             solver = new DefaultSolver(options, heapModel, selector, new MapBasedCSManager());
         }
 
-        setPlugin(solver, options);
+        setPlugin(solver, options, algorithm);
         solver.solve();
         return solver.getResult();
     }
 
-    private static void setPlugin(Solver solver, AnalysisOptions options) {
+    private static void setPlugin(Solver solver, AnalysisOptions options, String algorithm) {
         CompositePlugin plugin = new CompositePlugin();
         // add builtin plugins
         // To record elapsed time precisely, AnalysisTimer should be added at first.
@@ -168,6 +178,13 @@ public class PointerAnalysis extends ProgramAnalysis<PointerAnalysisResult> {
         if (options.getString("taint-config") != null
                 || !((List<String>) options.get("taint-config-providers")).isEmpty()) {
             plugin.addPlugin(new TaintAnalysis());
+        }
+        if ("cutshortcut".equals(algorithm)) {
+            MakeDefaultContainerConfig.make();
+            plugin.addPlugin(
+                    new LocalFlowHandler(),
+                    new FieldAccessHandler(),
+                    new ContainerAccessHandler());
         }
         plugin.addPlugin(new ResultProcessor());
         // add plugins specified in options

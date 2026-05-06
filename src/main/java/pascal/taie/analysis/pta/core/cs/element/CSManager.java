@@ -24,6 +24,7 @@ package pascal.taie.analysis.pta.core.cs.element;
 
 import pascal.taie.analysis.pta.core.cs.context.Context;
 import pascal.taie.analysis.pta.core.heap.Obj;
+import pascal.taie.analysis.pta.plugin.container.Host;
 import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.language.classes.JField;
@@ -75,6 +76,11 @@ public interface CSManager {
     ArrayIndex getArrayIndex(CSObj array);
 
     /**
+     * @return the corresponding HostPointer for given host/category pair.
+     */
+    HostPointer getHostPointer(Host host, String category);
+
+    /**
      * @return all variables (without contexts).
      */
     Collection<Var> getVars();
@@ -113,6 +119,11 @@ public interface CSManager {
      * @return all array index pointers.
      */
     Collection<ArrayIndex> getArrayIndexes();
+
+    /**
+     * @return all host pointers.
+     */
+    Collection<HostPointer> getHostPointers();
 
     /**
      * @return all pointers managed by this manager.

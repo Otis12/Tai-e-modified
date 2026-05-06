@@ -26,6 +26,7 @@ import pascal.taie.analysis.graph.callgraph.CallGraph;
 import pascal.taie.analysis.graph.callgraph.CallKind;
 import pascal.taie.analysis.pta.core.cs.element.ArrayIndex;
 import pascal.taie.analysis.pta.core.cs.element.CSVar;
+import pascal.taie.analysis.pta.core.cs.element.HostPointer;
 import pascal.taie.analysis.pta.core.cs.element.InstanceField;
 import pascal.taie.analysis.pta.core.cs.element.Pointer;
 import pascal.taie.analysis.pta.core.cs.element.StaticField;
@@ -56,6 +57,9 @@ public class ObjectFlowGraph extends NodeManager
     public ObjectFlowGraph(PointerFlowGraph pfg,
                            CallGraph<Invoke, JMethod> callGraph) {
         pfg.pointers().forEach(pointer -> {
+            if (!isRepresentablePointer(pointer)) {
+                return;
+            }
             toNode(pointer); // ensure every pointer has a corresponding node
             pfg.getOutEdgesOf(pointer).forEach(this::addPointerFlowEdge);
         });
@@ -78,6 +82,10 @@ public class ObjectFlowGraph extends NodeManager
     }
 
     private void addPointerFlowEdge(PointerFlowEdge edge) {
+        if (!isRepresentablePointer(edge.source())
+                || !isRepresentablePointer(edge.target())) {
+            return;
+        }
         FlowKind kind = edge.kind();
         Node source = toNode(edge.source());
         Node target = toNode(edge.target());
@@ -93,6 +101,10 @@ public class ObjectFlowGraph extends NodeManager
         inEdges.put(flowEdge.target(), flowEdge);
     }
 
+    private static boolean isRepresentablePointer(Pointer pointer) {
+        return !(pointer instanceof HostPointer);
+    }
+
     /**
      * Converts given pointer to a node in this OFG.
      */
@@ -105,9 +117,12 @@ public class ObjectFlowGraph extends NodeManager
         } else if (pointer instanceof ArrayIndex arrayIndex) {
             return getOrCreateArrayIndexNode(
                     arrayIndex.getArray().getObject());
-        } else {
+        } else if (pointer instanceof StaticField staticField) {
             return getOrCreateStaticFieldNode(
-                    ((StaticField) pointer).getField());
+                    staticField.getField());
+        } else {
+            throw new IllegalArgumentException(
+                    "Unsupported pointer in ObjectFlowGraph: " + pointer.getClass());
         }
     }
 

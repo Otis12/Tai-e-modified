@@ -72,6 +72,8 @@ import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.type.ArrayType;
 import pascal.taie.language.type.ClassType;
+import pascal.taie.language.type.NullType;
+import pascal.taie.language.type.ReferenceType;
 import pascal.taie.language.type.Type;
 import pascal.taie.language.type.TypeSystem;
 import pascal.taie.util.collection.Maps;
@@ -112,9 +114,9 @@ public class DefaultSolver implements Solver {
 
     private final TypeSystem typeSystem;
 
-    private final PointsToSetFactory ptsFactory;
+    protected final PointsToSetFactory ptsFactory;
 
-    private final PropagateTypes propTypes;
+    protected final PropagateTypes propTypes;
 
     /**
      * Whether only analyzes application code.
@@ -133,27 +135,27 @@ public class DefaultSolver implements Solver {
      */
     private volatile boolean isTimeout;
 
-    private Plugin plugin;
+    protected Plugin plugin;
 
-    private WorkList workList;
+    protected WorkList workList;
 
-    private CSCallGraph callGraph;
+    protected CSCallGraph callGraph;
 
-    private PointerFlowGraph pointerFlowGraph;
+    protected PointerFlowGraph pointerFlowGraph;
 
-    private Set<JMethod> reachableMethods;
+    protected Set<JMethod> reachableMethods;
 
     /**
      * Set of classes that have been initialized.
      */
-    private Set<JClass> initializedClasses;
+    protected Set<JClass> initializedClasses;
 
     /**
      * Set of methods to be intercepted and ignored.
      */
-    private Set<JMethod> ignoredMethods;
+    protected Set<JMethod> ignoredMethods;
 
-    private StmtProcessor stmtProcessor;
+    protected StmtProcessor stmtProcessor;
 
     private PointerAnalysisResult result;
 
@@ -245,7 +247,7 @@ public class DefaultSolver implements Solver {
     /**
      * Initializes pointer analysis.
      */
-    private void initialize() {
+    protected void initialize() {
         callGraph = new CSCallGraph(csManager);
         pointerFlowGraph = new PointerFlowGraph(csManager);
         workList = new WorkList();
@@ -299,7 +301,7 @@ public class DefaultSolver implements Solver {
     /**
      * Processes work list entries until the work list is empty.
      */
-    private void analyze() {
+    protected void analyze() {
         while (!workList.isEmpty() && !isTimeout) {
             // phase starts
             while (!workList.isEmpty() && !isTimeout) {
@@ -336,7 +338,7 @@ public class DefaultSolver implements Solver {
      * Propagates pointsToSet to pt(pointer) and its PFG successors,
      * returns the difference set of pointsToSet and pt(pointer).
      */
-    private PointsToSet propagate(Pointer pointer, PointsToSet pointsToSet) {
+    protected PointsToSet propagate(Pointer pointer, PointsToSet pointsToSet) {
         logger.trace("Propagate {} to {}", pointsToSet, pointer);
         Set<Predicate<CSObj>> filters = pointer.getFilters();
         if (!filters.isEmpty()) {
@@ -362,7 +364,7 @@ public class DefaultSolver implements Solver {
      * @param baseVar the base variable
      * @param pts     set of new discovered objects pointed by the variable.
      */
-    private void processInstanceStore(CSVar baseVar, PointsToSet pts) {
+    protected void processInstanceStore(CSVar baseVar, PointsToSet pts) {
         Context context = baseVar.getContext();
         Var var = baseVar.getVar();
         for (StoreField store : var.getStoreFields()) {
@@ -389,7 +391,7 @@ public class DefaultSolver implements Solver {
      * @param baseVar the base variable
      * @param pts     set of new discovered objects pointed by the variable.
      */
-    private void processInstanceLoad(CSVar baseVar, PointsToSet pts) {
+    protected void processInstanceLoad(CSVar baseVar, PointsToSet pts) {
         Context context = baseVar.getContext();
         Var var = baseVar.getVar();
         for (LoadField load : var.getLoadFields()) {
@@ -415,7 +417,7 @@ public class DefaultSolver implements Solver {
      * @param arrayVar the array variable
      * @param pts      set of new discovered arrays pointed by the variable.
      */
-    private void processArrayStore(CSVar arrayVar, PointsToSet pts) {
+    protected void processArrayStore(CSVar arrayVar, PointsToSet pts) {
         Context context = arrayVar.getContext();
         Var var = arrayVar.getVar();
         for (StoreArray store : var.getStoreArrays()) {
@@ -445,7 +447,7 @@ public class DefaultSolver implements Solver {
      * @param arrayVar the array variable
      * @param pts      set of new discovered arrays pointed by the variable.
      */
-    private void processArrayLoad(CSVar arrayVar, PointsToSet pts) {
+    protected void processArrayLoad(CSVar arrayVar, PointsToSet pts) {
         Context context = arrayVar.getContext();
         Var var = arrayVar.getVar();
         for (LoadArray load : var.getLoadArrays()) {
@@ -468,7 +470,7 @@ public class DefaultSolver implements Solver {
      * @param recv the receiver variable
      * @param pts  set of new discovered objects pointed by the variable.
      */
-    private void processCall(CSVar recv, PointsToSet pts) {
+    protected void processCall(CSVar recv, PointsToSet pts) {
         Context context = recv.getContext();
         Var var = recv.getVar();
         for (Invoke callSite : var.getInvokes()) {
@@ -498,7 +500,7 @@ public class DefaultSolver implements Solver {
     }
 
 
-    private void processCallEdge(Edge<CSCallSite, CSMethod> edge) {
+    protected void processCallEdge(Edge<CSCallSite, CSMethod> edge) {
         if (callGraph.addEdge(edge)) {
             // process new call edge
             CSMethod csCallee = edge.getCallee();
@@ -548,7 +550,7 @@ public class DefaultSolver implements Solver {
         }
     }
 
-    private boolean isIgnored(JMethod method) {
+    protected boolean isIgnored(JMethod method) {
         return ignoredMethods.contains(method) ||
                 onlyApp && !method.isApplication();
     }
@@ -556,14 +558,19 @@ public class DefaultSolver implements Solver {
     /**
      * Processes new reachable methods.
      */
-    private void processNewMethod(JMethod method) {
+    protected void processNewMethod(JMethod method) {
         if (reachableMethods.add(method)) {
             plugin.onNewMethod(method);
             method.getIR().forEach(stmt -> plugin.onNewStmt(stmt, method));
         }
     }
 
-    private class StmtProcessor {
+    public static boolean isConcerned(Exp exp) {
+        Type type = exp.getType();
+        return type instanceof ReferenceType && !(type instanceof NullType);
+    }
+
+    protected class StmtProcessor {
 
         /**
          * Information shared by all visitors.

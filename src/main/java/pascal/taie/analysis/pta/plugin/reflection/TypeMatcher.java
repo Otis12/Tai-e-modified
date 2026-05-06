@@ -165,6 +165,13 @@ class TypeMatcher {
         }
         // search definition of args
         int argIndex = argIndexes.get(invoke.getMethodRef().getName());
+        // [javaparser debug] 检查参数索引是否有效
+        if (argIndex >= invoke.getInvokeExp().getArgCount()) {
+            // 记录参数不匹配问题到日志
+            recordArgMismatch(invoke, invoke.getMethodRef().getName(), argIndex + 1, invoke.getInvokeExp().getArgCount());
+            // 参数索引越界，返回空参数类型
+            return new TypeInfo(returnType, List.of());
+        }
         Var args = invoke.getInvokeExp().getArg(argIndex);
         Type[] argTypes = null;
         if (args.isConst()) {
@@ -257,5 +264,26 @@ class TypeMatcher {
             return 0;
         }
         return -1;
+    }
+    
+    /**
+     * [javaparser debug] 记录参数数量不匹配问题到JavaParserProblemTracker
+     */
+    private static void recordArgMismatch(Invoke invoke, String methodName, int expected, int actual) {
+        try {
+            // 通过反射调用Soot模块的JavaParserProblemTracker
+            Class<?> trackerClass = Class.forName("soot.javaparser.JavaParserProblemTracker");
+            Object tracker = trackerClass.getMethod("getInstance").invoke(null);
+            java.lang.reflect.Method recordMethod = trackerClass.getMethod(
+                "recordArgumentCountMismatch", 
+                String.class, String.class, int.class, int.class, String.class
+            );
+            
+            String invokeLocation = invoke.getContainer().getDeclaringClass().getName() + "." + 
+                                   invoke.getContainer().getName();
+            recordMethod.invoke(tracker, invokeLocation, methodName, expected, actual, "TypeMatcher");
+        } catch (Exception e) {
+            // 如果反射调用失败，忽略（日志太多可能影响性能）
+        }
     }
 }

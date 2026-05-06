@@ -400,6 +400,12 @@ public class IsNullAnalysis extends AnalysisDriver<Stmt, IsNullFact> {
                     return !out.equals(oldOut);
                 } else { // use parameter annotation info
                     for (int paramIndex = 0; paramIndex < invokeMethod.getParamCount(); ++paramIndex) {
+                        // [javaparser debug] 添加参数数量检查
+                        if (paramIndex >= stmt.getInvokeExp().getArgCount()) {
+                            // 记录参数不匹配
+                            recordArgMismatch(stmt, invokeMethod.getName(), invokeMethod.getParamCount(), stmt.getInvokeExp().getArgCount());
+                            break;
+                        }
                         NullnessAnnotation nullnessAnnotation =
                                 NullnessAnnotation.resolveParameterAnnotation(invokeMethod, paramIndex);
                         if (nullnessAnnotation == NullnessAnnotation.NONNULL) {
@@ -542,6 +548,26 @@ public class IsNullAnalysis extends AnalysisDriver<Stmt, IsNullFact> {
             @Override
             public Boolean visitDefault(Stmt stmt) {
                 return out.copyFrom(in);
+            }
+            
+            /**
+             * [javaparser debug] 记录参数数量不匹配问题到JavaParserProblemTracker
+             */
+            private void recordArgMismatch(Invoke invoke, String methodName, int expected, int actual) {
+                try {
+                    Class<?> trackerClass = Class.forName("soot.javaparser.JavaParserProblemTracker");
+                    Object tracker = trackerClass.getMethod("getInstance").invoke(null);
+                    java.lang.reflect.Method recordMethod = trackerClass.getMethod(
+                        "recordArgumentCountMismatch", 
+                        String.class, String.class, int.class, int.class, String.class
+                    );
+                    
+                    String invokeLocation = invoke.getContainer().getDeclaringClass().getName() + "." + 
+                                           invoke.getContainer().getName();
+                    recordMethod.invoke(tracker, invokeLocation, methodName, expected, actual, "IsNullAnalysis");
+                } catch (Exception e) {
+                    // 忽略反射调用失败
+                }
             }
         }
     }

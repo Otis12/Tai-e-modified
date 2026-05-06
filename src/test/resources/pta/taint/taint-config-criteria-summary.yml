@@ -1,0 +1,12 @@
+sources:
+  - { kind: call, method: "<CriteriaSource: java.lang.Long source()>", index: result }
+  - { kind: call, method: "<CriteriaStringSource: java.lang.String source()>", index: result }
+
+sinks:
+  - { method: "<CriteriaMapper: int updateByExampleSelective(CriteriaOrder,CriteriaExample)>", index: 1 }
+
+transfers:
+  # Keep append(String) enabled so source strings enter the builder object.
+  # toString() is intentionally not configured here; the regression checks that
+  # no hardcoded core summary silently re-enables that unsafe bridge.
+  - { method: "<java.lang.StringBuilder: java.lang.StringBuilder append(java.lang.String)>", from: 0, to: base }

@@ -32,6 +32,49 @@ import java.util.Set;
 
 public class PointerFlowEdge implements Edge<Pointer> {
 
+    public enum Kind {
+        LOCAL_ASSIGN(FlowKind.LOCAL_ASSIGN),
+        CAST(FlowKind.CAST),
+        INSTANCE_LOAD(FlowKind.INSTANCE_LOAD),
+        INSTANCE_STORE(FlowKind.INSTANCE_STORE),
+        ARRAY_LOAD(FlowKind.ARRAY_LOAD),
+        ARRAY_STORE(FlowKind.ARRAY_STORE),
+        STATIC_LOAD(FlowKind.STATIC_LOAD),
+        STATIC_STORE(FlowKind.STATIC_STORE),
+        PARAMETER_PASSING(FlowKind.PARAMETER_PASSING),
+        RETURN(FlowKind.RETURN),
+        ARG_TO_HOST(FlowKind.ARG_TO_HOST),
+        HOST_TO_RESULT(FlowKind.HOST_TO_RESULT),
+        SUBSET(FlowKind.SUBSET),
+        CORRELATION(FlowKind.CORRELATION),
+        ARRAYCOPY(FlowKind.ARRAYCOPY),
+        ID(FlowKind.ID),
+        VIRTUAL_ARRAY(FlowKind.VIRTUAL_ARRAY),
+        VIRTUAL_ARG(FlowKind.VIRTUAL_ARG),
+        SET(FlowKind.SET),
+        GET(FlowKind.GET),
+        NON_RELAY_GET(FlowKind.NON_RELAY_GET);
+
+        private final FlowKind flowKind;
+
+        Kind(FlowKind flowKind) {
+            this.flowKind = flowKind;
+        }
+
+        public FlowKind asFlowKind() {
+            return flowKind;
+        }
+
+        public static Kind fromFlowKind(FlowKind flowKind) {
+            for (Kind kind : values()) {
+                if (kind.flowKind == flowKind) {
+                    return kind;
+                }
+            }
+            return null;
+        }
+    }
+
     private final FlowKind kind;
 
     private final Pointer source;
@@ -46,15 +89,42 @@ public class PointerFlowEdge implements Edge<Pointer> {
         this.target = target;
     }
 
+    public PointerFlowEdge(FlowKind kind, Pointer source, Pointer target,
+                           Transfer transfer) {
+        this(kind, source, target);
+        addTransfer(transfer);
+    }
+
+    public PointerFlowEdge(Kind kind, Pointer source, Pointer target) {
+        this(kind.asFlowKind(), source, target);
+    }
+
+    public PointerFlowEdge(Kind kind, Pointer source, Pointer target,
+                           Transfer transfer) {
+        this(kind.asFlowKind(), source, target, transfer);
+    }
+
     public FlowKind kind() {
         return kind;
+    }
+
+    public Kind getKind() {
+        return Kind.fromFlowKind(kind);
     }
 
     public Pointer source() {
         return source;
     }
 
+    public Pointer getSource() {
+        return source;
+    }
+
     public Pointer target() {
+        return target;
+    }
+
+    public Pointer getTarget() {
         return target;
     }
 
@@ -76,9 +146,13 @@ public class PointerFlowEdge implements Edge<Pointer> {
         return transfers;
     }
 
+    public Transfer getTransfer() {
+        return transfers.isEmpty() ? Identity.get() : transfers.iterator().next();
+    }
+
     @Override
     public int hashCode() {
-        return Hashes.hash(source, target);
+        return Hashes.hash(kind, source, target);
     }
 
     @Override
@@ -90,7 +164,9 @@ public class PointerFlowEdge implements Edge<Pointer> {
             return false;
         }
         PointerFlowEdge that = (PointerFlowEdge) o;
-        return source.equals(that.source) && target.equals(that.target);
+        return kind == that.kind &&
+                source.equals(that.source) &&
+                target.equals(that.target);
     }
 
     @Override

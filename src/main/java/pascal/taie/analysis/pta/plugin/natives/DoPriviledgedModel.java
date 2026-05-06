@@ -74,11 +74,36 @@ public class DoPriviledgedModel extends IRModelPlugin {
     }
 
     private List<Stmt> doPrivileged(Invoke invoke, MethodRef run) {
+        // [javaparser debug] 添加参数数量检查
+        if (invoke.getInvokeExp().getArgCount() < 1) {
+            recordArgMismatch(invoke, "AccessController.doPrivileged", 1, 0);
+            return List.of();
+        }
         Invoke invokeRun = new Invoke(invoke.getContainer(),
                 new InvokeInterface(run, invoke.getInvokeExp().getArg(0), List.of()),
                 invoke.getResult());
         run2DoPriv.put(invokeRun, invoke);
         return List.of(invokeRun);
+    }
+    
+    /**
+     * [javaparser debug] 记录参数数量不匹配问题到JavaParserProblemTracker
+     */
+    private static void recordArgMismatch(Invoke invoke, String methodName, int expected, int actual) {
+        try {
+            Class<?> trackerClass = Class.forName("soot.javaparser.JavaParserProblemTracker");
+            Object tracker = trackerClass.getMethod("getInstance").invoke(null);
+            java.lang.reflect.Method recordMethod = trackerClass.getMethod(
+                "recordArgumentCountMismatch", 
+                String.class, String.class, int.class, int.class, String.class
+            );
+            
+            String invokeLocation = invoke.getContainer().getDeclaringClass().getName() + "." + 
+                                   invoke.getContainer().getName();
+            recordMethod.invoke(tracker, invokeLocation, methodName, expected, actual, "DoPriviledgedModel");
+        } catch (Exception e) {
+            // 忽略反射调用失败
+        }
     }
 
     /**
