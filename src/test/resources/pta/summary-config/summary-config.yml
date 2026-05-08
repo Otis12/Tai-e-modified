@@ -1,0 +1,2 @@
+summaries:
+  - { method: "<SummaryConfigTaint: java.lang.String passthrough(java.lang.String)>", from: 0, to: result }

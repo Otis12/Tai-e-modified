@@ -48,6 +48,7 @@ import pascal.taie.analysis.pta.core.heap.HeapModel;
 import pascal.taie.analysis.pta.core.heap.MockObj;
 import pascal.taie.analysis.pta.core.heap.Obj;
 import pascal.taie.analysis.pta.core.solver.summary.SummaryManager;
+import pascal.taie.analysis.pta.core.solver.summary.YamlSummaryConfigProvider;
 import pascal.taie.analysis.pta.plugin.Plugin;
 import pascal.taie.analysis.pta.pts.PointsToSet;
 import pascal.taie.analysis.pta.pts.PointsToSetFactory;
@@ -89,6 +90,9 @@ import static pascal.taie.language.classes.Signatures.FINALIZER_REGISTER;
 public class SummarySolver implements Solver {
 
     private static final Logger logger = LogManager.getLogger(SummarySolver.class);
+
+    public static final String IGNORED_METHOD_SIGNATURES_KEY =
+            SummarySolver.class.getName() + ".ignoredMethodSignatures";
 
     /**
      * Descriptor for array objects created implicitly by multiarray instruction.
@@ -268,6 +272,7 @@ public class SummarySolver implements Solver {
         summaryManager = new SummaryManager(this);
         //code summary: 加载硬编码的测试摘要规则（包括 getter/setter 和 JDK 容器方法）
         summaryManager.initHardcodedSummaries();
+        loadYamlSummaryConfig();
         // code summary: 将所有有摘要的方法注册为 ignored
         // 效果：processCallEdge 中 isIgnored(method) 返回 true 时：
         //   - addCSMethod() 跳过方法体分析（不进入 JDK 方法内部）
@@ -290,6 +295,16 @@ public class SummarySolver implements Solver {
             timeLimiter.countDown();
         }
         plugin.onStart();
+    }
+
+    private void loadYamlSummaryConfig() {
+        String summaryConfig = options.getString("summary-config");
+        if (summaryConfig == null || summaryConfig.isBlank()) {
+            return;
+        }
+        var provider = new YamlSummaryConfigProvider(hierarchy, typeSystem);
+        provider.setPath(summaryConfig);
+        summaryManager.mergeConfig(provider.get());
     }
 
     private class TimeLimiter {
@@ -1127,6 +1142,10 @@ public class SummarySolver implements Solver {
             result = new PointerAnalysisResultImpl(
                     propTypes, csManager, heapModel,
                     callGraph, pointerFlowGraph);
+            result.storeResult(IGNORED_METHOD_SIGNATURES_KEY,
+                    ignoredMethods.stream()
+                            .map(JMethod::getSignature)
+                            .collect(java.util.stream.Collectors.toUnmodifiableSet()));
         }
         return result;
     }

@@ -11,6 +11,7 @@
     springboot-add-getter-callsource: false
     distinguish-string-constants: reflection # (distinguish reflection-relevant
     codesummary: codesummary
+    summary-config: null
     # string constants, i.e., class, method, and field names)
     # | null (do not distinguish any string constants)
     # | app (distinguish string constants in application code)
