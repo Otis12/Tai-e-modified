@@ -49,7 +49,6 @@ import pascal.taie.language.type.ArrayType;
 import pascal.taie.language.type.ClassType;
 import pascal.taie.language.type.Type;
 import pascal.taie.language.type.TypeSystem;
-import pascal.taie.util.collection.Pair;
 
 import java.io.File;
 import java.io.IOException;
@@ -57,8 +56,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static pascal.taie.analysis.pta.plugin.taint.IndexRef.ARRAY_SUFFIX;
@@ -141,8 +140,6 @@ public class YamlTaintConfigProvider extends TaintConfigProvider {
 
         private final TypeSystem typeSystem;
 
-
-        List<Pair<Object,Object>> phantomSinks;
 
         private Deserializer(SignatureMatcher matcher, TypeSystem typeSystem) {
             this.matcher = matcher;
@@ -308,9 +305,10 @@ public class YamlTaintConfigProvider extends TaintConfigProvider {
          */
         private List<PhantomSink> deserializePhantomSinks(JsonNode node) {
             if (node instanceof ArrayNode arrayNode) {
-                List<PhantomSink> result = Collections.synchronizedList(new ArrayList<>());
+                List<PhantomSink> result = new ArrayList<>();
+                Set<String> seen = pascal.taie.util.collection.Sets.newSet();
                 List<JClass> classList = World.get().getClassHierarchy().applicationClasses().toList();
-                for(JClass jClass: classList) {
+                for (JClass jClass: classList) {
                     if (jClass.isPhantom()) {
                         continue;
                     }
@@ -320,38 +318,34 @@ public class YamlTaintConfigProvider extends TaintConfigProvider {
                         }
                         IR methodIR = jMethod.getIR();
                         List<Stmt> stmts = methodIR.getStmts();
-                        stmts.parallelStream().forEach(stmt -> {
+                        for (Stmt stmt : stmts) {
                             if (stmt instanceof Invoke il) {
-                                if (il.getInvokeExp() instanceof InvokeDynamic)
-                                    return;
+                                if (il.getInvokeExp() instanceof InvokeDynamic) {
+                                    continue;
+                                }
                                 String invokeMethodSignature = il.getInvokeExp().getMethodRef().getSubsignature().toString();
                                 String invokeMethodClassName = il.getInvokeExp().getMethodRef().getDeclaringClass().getName();
                                 String invokeMethodFullSig = invokeMethodClassName + ": " + invokeMethodSignature;
                                 for (JsonNode elem : arrayNode) {
                                     String methodSig = elem.get("method").asText();
-                                    if(matcher.getMethods(methodSig).isEmpty() && methodSig.contains(invokeMethodFullSig)) {
-                                        MockJMethod mockJMethod = new MockJMethod(il.getInvokeExp().getMethodRef(),new HashSet<>(), il);
+                                    if (matcher.getMethods(methodSig).isEmpty() && methodSig.contains(invokeMethodFullSig)) {
+                                        MockJMethod mockJMethod = new MockJMethod(
+                                                il.getInvokeExp().getMethodRef(),
+                                                pascal.taie.util.collection.Sets.newSet(),
+                                                il);
                                         int index = InvokeUtils.toInt(elem.get("index").asText());
                                         if (index >= 0 && index >= il.getInvokeExp().getArgCount()){
-                                            logger.error("PhantomSink: wrong index!\n<{}>, index: {}",mockJMethod.toString(),index);
+                                            logger.error("PhantomSink: wrong index!\n<{}>, index: {}", mockJMethod.toString(), index);
                                         }
                                         IndexRef indexRef = new IndexRef(IndexRef.Kind.VAR, index, null);
-                                        PhantomSink phantomSink = new PhantomSink(mockJMethod,indexRef);
-//                                        Pair<Object,Object> phantomSink = new Pair<>(mockJMethod, elem.get("index"));
-                                        boolean a = false;
-                                        for(PhantomSink phantomSinka: result) {
-                                            if(phantomSinka.toString().equals(phantomSink.toString())) {
-                                                a = true;
-                                                break;
-                                            }
-                                        }
-                                        if(!a){
+                                        PhantomSink phantomSink = new PhantomSink(mockJMethod, indexRef);
+                                        if (seen.add(phantomSink.toString())) {
                                             result.add(phantomSink);
                                         }
                                     }
                                 }
                             }
-                        });
+                        }
                     }
                 }
 
