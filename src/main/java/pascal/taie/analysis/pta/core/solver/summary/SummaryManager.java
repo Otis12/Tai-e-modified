@@ -33,6 +33,7 @@ import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.type.ClassType;
+import pascal.taie.language.type.ReferenceType;
 import pascal.taie.language.type.Type;
 import pascal.taie.language.type.VoidType;
 import pascal.taie.util.collection.Maps;
@@ -2544,18 +2545,119 @@ public class SummaryManager {
         addJdkSummary(hierarchy, parser, summaries,
                 "<java.util.Collections: java.util.Map unmodifiableMap(java.util.Map)>",
                 "0", "result");
-        addJdkSummary(hierarchy, parser, summaries,
-                "<java.lang.StringBuilder: java.lang.StringBuilder append(java.lang.String)>",
-                "base", "result");
-        addJdkSummary(hierarchy, parser, summaries,
-                "<java.lang.StringBuilder: java.lang.String toString()>",
-                "base", "result");
-        addJdkSummary(hierarchy, parser, summaries,
-                "<java.lang.StringBuffer: java.lang.StringBuffer append(java.lang.String)>",
-                "base", "result");
-        addJdkSummary(hierarchy, parser, summaries,
-                "<java.lang.StringBuffer: java.lang.String toString()>",
-                "base", "result");
+        addJdkStringSummaries(hierarchy, parser, summaries);
+        addJdkStringBuilderSummaries(hierarchy, parser, summaries,
+                "java.lang.StringBuilder");
+        addJdkStringBuilderSummaries(hierarchy, parser, summaries,
+                "java.lang.StringBuffer");
+    }
+
+    private void addJdkStringSummaries(pascal.taie.language.classes.ClassHierarchy hierarchy,
+                                       AccessPathParser parser,
+                                       java.util.List<SummaryDetail> summaries) {
+        JClass stringClass = hierarchy.getJREClass("java.lang.String");
+        if (stringClass == null) {
+            logger.debug("JDK String summaries: class not found, skipping");
+            return;
+        }
+        for (JMethod method : stringClass.getDeclaredMethods()) {
+            if (!returns(method, "java.lang.String")) {
+                continue;
+            }
+            String name = method.getName();
+            if ("concat".equals(name)
+                    && method.getParamCount() == 1
+                    && paramIs(method, 0, "java.lang.String")) {
+                addJdkSummary(parser, summaries, method, "base", "result");
+                addJdkSummary(parser, summaries, method, "0", "result");
+            } else if (isStringBaseToResultMethod(method)) {
+                addJdkSummary(parser, summaries, method, "base", "result");
+            } else if ("replace".equals(name)
+                    || "replaceAll".equals(name)
+                    || "replaceFirst".equals(name)) {
+                addJdkSummary(parser, summaries, method, "base", "result");
+            } else if (method.isStatic()
+                    && ("valueOf".equals(name) || "copyValueOf".equals(name))) {
+                for (int i = 0; i < method.getParamCount(); i++) {
+                    if (method.getParamType(i) instanceof ReferenceType) {
+                        addJdkSummary(parser, summaries, method,
+                                Integer.toString(i), "result");
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean isStringBaseToResultMethod(JMethod method) {
+        if (method.isStatic()) {
+            return false;
+        }
+        return switch (method.getName()) {
+            case "substring", "trim", "strip", "stripLeading", "stripTrailing",
+                    "toLowerCase", "toUpperCase", "intern" -> true;
+            default -> false;
+        };
+    }
+
+    private void addJdkStringBuilderSummaries(
+            pascal.taie.language.classes.ClassHierarchy hierarchy,
+            AccessPathParser parser,
+            java.util.List<SummaryDetail> summaries,
+            String className) {
+        JClass builderClass = hierarchy.getJREClass(className);
+        if (builderClass == null) {
+            logger.debug("JDK builder summaries: class not found, skipping: {}", className);
+            return;
+        }
+        for (JMethod method : builderClass.getDeclaredMethods()) {
+            String name = method.getName();
+            if ("toString".equals(name)
+                    && method.getParamCount() == 0
+                    && returns(method, "java.lang.String")) {
+                addJdkSummary(parser, summaries, method, "base", "result");
+            } else if (isBuilderBaseToResultMethod(method, className)) {
+                addJdkSummary(parser, summaries, method, "base", "result");
+                if ("append".equals(name) || "insert".equals(name)) {
+                    addBuilderReferenceArgsToResult(parser, summaries, method);
+                }
+            }
+        }
+    }
+
+    private boolean isBuilderBaseToResultMethod(JMethod method, String className) {
+        if (method.isStatic() || !returns(method, className)) {
+            return false;
+        }
+        return switch (method.getName()) {
+            case "append", "insert", "delete", "reverse" -> true;
+            default -> false;
+        };
+    }
+
+    private void addBuilderReferenceArgsToResult(AccessPathParser parser,
+                                                 java.util.List<SummaryDetail> summaries,
+                                                 JMethod method) {
+        for (int i = 0; i < method.getParamCount(); i++) {
+            if (isStringBuilderContentArg(method.getParamType(i))) {
+                addJdkSummary(parser, summaries, method,
+                        Integer.toString(i), "result");
+            }
+        }
+    }
+
+    private boolean isStringBuilderContentArg(Type type) {
+        return switch (type.getName()) {
+            case "java.lang.String", "java.lang.Object", "java.lang.CharSequence" -> true;
+            default -> false;
+        };
+    }
+
+    private boolean returns(JMethod method, String typeName) {
+        return method.getReturnType().getName().equals(typeName);
+    }
+
+    private boolean paramIs(JMethod method, int index, String typeName) {
+        return method.getParamType(index).getName().equals(typeName);
     }
 
     private int addJdkContainerSummary(pascal.taie.language.classes.ClassHierarchy hierarchy,
@@ -2585,6 +2687,14 @@ public class SummaryManager {
             logger.debug("JDK summary: method not found, skipping: {}", methodSignature);
             return;
         }
+        addJdkSummary(parser, summaries, method, fromStr, toStr);
+    }
+
+    private void addJdkSummary(AccessPathParser parser,
+                               java.util.List<SummaryDetail> summaries,
+                               JMethod method,
+                               String fromStr, String toStr) {
+        String methodSignature = method.getSignature();
         AccessPath source = parser.parse(method, fromStr);
         AccessPath target = parser.parse(method, toStr);
         if (source != null && target != null) {

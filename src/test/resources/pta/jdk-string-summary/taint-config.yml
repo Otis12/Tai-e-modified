@@ -1,0 +1,5 @@
+sources:
+  - { kind: call, method: "<SourceSink: java.lang.String source*(*{0+})>", index: result }
+
+sinks:
+  - { method: "<SourceSink: void sink(java.lang.String)>", index: 0 }

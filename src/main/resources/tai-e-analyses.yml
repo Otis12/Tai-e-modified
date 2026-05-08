@@ -17,8 +17,8 @@
     # | app (distinguish string constants in application code)
     # | all (distinguish all string constants)
     # | <predicate-class-name>
-    merge-string-objects: true
-    merge-string-builders: true
+    merge-string-objects: false
+    merge-string-builders: false
     merge-exception-objects: true
     summary-container-map: true
     summary-container-list: true

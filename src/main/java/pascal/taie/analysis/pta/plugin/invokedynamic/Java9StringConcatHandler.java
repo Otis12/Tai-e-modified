@@ -64,9 +64,9 @@ public class Java9StringConcatHandler implements Plugin {
 
     private MethodRef appendString;
 
-    private MethodRef appendObject;
+    private MethodRef stringBuilderToString;
 
-    private MethodRef toString;
+    private MethodRef objectToString;
 
     /**
      * Counter for naming temporary variables.
@@ -85,10 +85,11 @@ public class Java9StringConcatHandler implements Plugin {
         appendString = Objects.requireNonNull(sb.getDeclaredMethod(Subsignature.get(
                         "java.lang.StringBuilder append(java.lang.String)")))
                 .getRef();
-        appendObject = Objects.requireNonNull(sb.getDeclaredMethod(Subsignature.get(
-                        "java.lang.StringBuilder append(java.lang.Object)")))
+        stringBuilderToString = Objects.requireNonNull(sb.getDeclaredMethod(Subsignature.get(
+                        "java.lang.String toString()")))
                 .getRef();
-        toString = Objects.requireNonNull(sb.getDeclaredMethod(Subsignature.get(
+        JClass object = typeSystem.getClassType(ClassNames.OBJECT).getJClass();
+        objectToString = Objects.requireNonNull(object.getDeclaredMethod(Subsignature.get(
                         "java.lang.String toString()")))
                 .getRef();
     }
@@ -141,22 +142,33 @@ public class Java9StringConcatHandler implements Plugin {
         InvokeDynamic indy = (InvokeDynamic) stringConcatMake.getInvokeExp();
         indy.getArgs().forEach(arg -> {
             if (arg.getType() instanceof ClassType argType) {
-                MethodRef append = argType.equals(string) ? appendString : appendObject;
+                Var rendered = arg;
+                MethodRef append = appendString;
+                if (!argType.equals(string)) {
+                    rendered = getTempVar(container, string);
+                    stmts.add(new Invoke(container,
+                            new InvokeVirtual(objectToString, arg, List.of()),
+                            rendered));
+                }
                 stmts.add(new Invoke(container,
-                        new InvokeVirtual(append, sbVar, List.of(arg))));
+                        new InvokeVirtual(append, sbVar, List.of(rendered))));
             }
         });
         // generate string = sb.toString();
         Var string = stringConcatMake.getResult();
         stmts.add(new Invoke(container,
-                new InvokeVirtual(toString, sbVar, List.of()),
+                new InvokeVirtual(stringBuilderToString, sbVar, List.of()),
                 string));
         return stmts;
     }
 
     private Var getTempVar(JMethod container) {
+        return getTempVar(container, stringBuilder);
+    }
+
+    private Var getTempVar(JMethod container, ClassType type) {
         String varName = "%stringconcat-" + counter++;
-        return new Var(container, varName, stringBuilder, -1);
+        return new Var(container, varName, type, -1);
     }
 
     @Override
