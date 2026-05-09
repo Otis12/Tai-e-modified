@@ -12,6 +12,13 @@
     distinguish-string-constants: reflection # (distinguish reflection-relevant
     codesummary: codesummary
     summary-config: null
+    jdk-analysis-mode: normal
+    jdk-summary-profile: auto
+    jdk-summary-configs: [ ]
+    jdk-summary-missing-signature: warn
+    jdk-summary-report-unsummarized: true
+    jdk-boundary-extra-includes: [ ]
+    jdk-boundary-extra-excludes: [ ]
     # string constants, i.e., class, method, and field names)
     # | null (do not distinguish any string constants)
     # | app (distinguish string constants in application code)
