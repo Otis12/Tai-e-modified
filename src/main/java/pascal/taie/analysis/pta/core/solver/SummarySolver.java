@@ -102,6 +102,12 @@ public class SummarySolver implements Solver {
     public static final String SUMMARY_APPLIED_COUNT_KEY =
             SummarySolver.class.getName() + ".summaryAppliedCount";
 
+    public static final String JDK_SUMMARY_CATALOG_STATS_KEY =
+            SummarySolver.class.getName() + ".jdkSummaryCatalogStats";
+
+    public static final String JDK_SUMMARY_CATALOG_METHOD_SIGNATURES_KEY =
+            SummarySolver.class.getName() + ".jdkSummaryCatalogMethodSignatures";
+
     /**
      * Descriptor for array objects created implicitly by multiarray instruction.
      */
@@ -1198,6 +1204,10 @@ public class SummarySolver implements Solver {
                     collectIgnoredMethodReasons());
             result.storeResult(SUMMARY_APPLIED_COUNT_KEY,
                     summaryManager.getSummaryAppliedCount());
+            result.storeResult(JDK_SUMMARY_CATALOG_STATS_KEY,
+                    summaryManager.getJdkSummaryCatalogStats());
+            result.storeResult(JDK_SUMMARY_CATALOG_METHOD_SIGNATURES_KEY,
+                    summaryManager.getJdkSummaryCatalogMethodSignatures());
         }
         return result;
     }

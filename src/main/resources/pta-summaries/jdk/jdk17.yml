@@ -1,0 +1,22 @@
+schema_version: 1
+id: jdk17
+scope: jdk
+java_versions: [17]
+description: JDK 17 and JDK 11+ summaries for PTA summary-only mode.
+
+defaults:
+  missing_signature: warn
+  unknown_effect: error
+
+summaries:
+  - method: "<java.lang.String: java.lang.String strip()>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String stripLeading()>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String stripTrailing()>"
+    effects:
+      - transfer: { from: base, to: result }
+
+noops: []

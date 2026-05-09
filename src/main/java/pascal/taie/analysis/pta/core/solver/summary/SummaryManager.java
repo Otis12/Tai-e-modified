@@ -34,7 +34,6 @@ import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.type.ClassType;
-import pascal.taie.language.type.ReferenceType;
 import pascal.taie.language.type.Type;
 import pascal.taie.language.type.VoidType;
 import pascal.taie.util.collection.Maps;
@@ -42,6 +41,7 @@ import pascal.taie.util.collection.MultiMap;
 import pascal.taie.util.collection.Sets;
 import javax.annotation.Nullable;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -152,6 +152,10 @@ public class SummaryManager {
     private long summaryAppliedCount;
     private long legacyCriteriaFallbackCount;
     private long globalReapplyFallbackCount;
+    private JdkSummaryCatalogStats jdkSummaryCatalogStats =
+            new JdkSummaryCatalogStats("none", List.of(), 0, 0, List.of());
+    private Set<String> jdkSummaryCatalogMethodSignatures = Set.of();
+    private List<JdkNoOpSummary> jdkNoOpSummaries = List.of();
 
     /**
      * 活跃调用点记录
@@ -291,6 +295,18 @@ public class SummaryManager {
                 registeredGetterSummaries, registeredSetterSummaries);
 
         addJdkUtilitySummaries(hierarchy, parser, summaries);
+        JdkSummaryCatalog jdkCatalog = loadJdkSummaryCatalog();
+        summaries.addAll(jdkCatalog.summaryConfig().summaryDetails());
+        jdkSummaryCatalogStats = jdkCatalog.stats();
+        jdkNoOpSummaries = jdkCatalog.noops();
+        jdkSummaryCatalogMethodSignatures = jdkCatalog.summaryConfig()
+                .summaryDetails()
+                .stream()
+                .map(summary -> summary.method().getSignature())
+                .collect(Collectors.toUnmodifiableSet());
+        logger.info("Initialized {} JDK catalog transfer summary rules and {} no-op selectors",
+                jdkSummaryCatalogStats.summaryCount(),
+                jdkSummaryCatalogStats.noopCount());
 
         if (!summaries.isEmpty()) {
             SummaryConfig hardcodedConfig = new SummaryConfig(summaries);
@@ -2073,6 +2089,51 @@ public class SummaryManager {
         return defaultValue;
     }
 
+    private String resolveStringOption(String key, String defaultValue) {
+        try {
+            var options = solver.getOptions();
+            if (options != null && options.has(key)) {
+                Object value = options.get(key);
+                return value == null ? defaultValue : value.toString();
+            }
+        } catch (RuntimeException e) {
+            logger.debug("SummaryManager: option '{}' unavailable, using default {}",
+                    key, defaultValue, e);
+        }
+        return defaultValue;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> resolveStringListOption(String key) {
+        try {
+            var options = solver.getOptions();
+            if (options != null && options.has(key)) {
+                Object value = options.get(key);
+                if (value instanceof List<?> list) {
+                    return list.stream()
+                            .filter(Objects::nonNull)
+                            .map(Object::toString)
+                            .toList();
+                }
+                if (value instanceof String str && !str.isBlank()) {
+                    return List.of(str);
+                }
+            }
+        } catch (RuntimeException e) {
+            logger.debug("SummaryManager: option '{}' unavailable, using default []",
+                    key, e);
+        }
+        return List.of();
+    }
+
+    private JdkSummaryCatalog loadJdkSummaryCatalog() {
+        return new JdkSummaryCatalogLoader(
+                solver.getHierarchy(),
+                resolveStringOption("jdk-summary-profile", "auto"),
+                resolveStringOption("jdk-summary-missing-signature", "warn"),
+                resolveStringListOption("jdk-summary-configs")).load();
+    }
+
     private int addAttributeCarrierSummaries(pascal.taie.language.classes.ClassHierarchy hierarchy) {
         int registered = 0;
         registered += addJdkContainerSummary(hierarchy,
@@ -2553,119 +2614,6 @@ public class SummaryManager {
         addJdkSummary(hierarchy, parser, summaries,
                 "<java.util.Collections: java.util.Map unmodifiableMap(java.util.Map)>",
                 "0", "result");
-        addJdkStringSummaries(hierarchy, parser, summaries);
-        addJdkStringBuilderSummaries(hierarchy, parser, summaries,
-                "java.lang.StringBuilder");
-        addJdkStringBuilderSummaries(hierarchy, parser, summaries,
-                "java.lang.StringBuffer");
-    }
-
-    private void addJdkStringSummaries(pascal.taie.language.classes.ClassHierarchy hierarchy,
-                                       AccessPathParser parser,
-                                       java.util.List<SummaryDetail> summaries) {
-        JClass stringClass = hierarchy.getJREClass("java.lang.String");
-        if (stringClass == null) {
-            logger.debug("JDK String summaries: class not found, skipping");
-            return;
-        }
-        for (JMethod method : stringClass.getDeclaredMethods()) {
-            if (!returns(method, "java.lang.String")) {
-                continue;
-            }
-            String name = method.getName();
-            if ("concat".equals(name)
-                    && method.getParamCount() == 1
-                    && paramIs(method, 0, "java.lang.String")) {
-                addJdkSummary(parser, summaries, method, "base", "result");
-                addJdkSummary(parser, summaries, method, "0", "result");
-            } else if (isStringBaseToResultMethod(method)) {
-                addJdkSummary(parser, summaries, method, "base", "result");
-            } else if ("replace".equals(name)
-                    || "replaceAll".equals(name)
-                    || "replaceFirst".equals(name)) {
-                addJdkSummary(parser, summaries, method, "base", "result");
-            } else if (method.isStatic()
-                    && ("valueOf".equals(name) || "copyValueOf".equals(name))) {
-                for (int i = 0; i < method.getParamCount(); i++) {
-                    if (method.getParamType(i) instanceof ReferenceType) {
-                        addJdkSummary(parser, summaries, method,
-                                Integer.toString(i), "result");
-                    }
-                }
-            }
-        }
-    }
-
-    private boolean isStringBaseToResultMethod(JMethod method) {
-        if (method.isStatic()) {
-            return false;
-        }
-        return switch (method.getName()) {
-            case "substring", "trim", "strip", "stripLeading", "stripTrailing",
-                    "toLowerCase", "toUpperCase", "intern" -> true;
-            default -> false;
-        };
-    }
-
-    private void addJdkStringBuilderSummaries(
-            pascal.taie.language.classes.ClassHierarchy hierarchy,
-            AccessPathParser parser,
-            java.util.List<SummaryDetail> summaries,
-            String className) {
-        JClass builderClass = hierarchy.getJREClass(className);
-        if (builderClass == null) {
-            logger.debug("JDK builder summaries: class not found, skipping: {}", className);
-            return;
-        }
-        for (JMethod method : builderClass.getDeclaredMethods()) {
-            String name = method.getName();
-            if ("toString".equals(name)
-                    && method.getParamCount() == 0
-                    && returns(method, "java.lang.String")) {
-                addJdkSummary(parser, summaries, method, "base", "result");
-            } else if (isBuilderBaseToResultMethod(method, className)) {
-                addJdkSummary(parser, summaries, method, "base", "result");
-                if ("append".equals(name) || "insert".equals(name)) {
-                    addBuilderReferenceArgsToResult(parser, summaries, method);
-                }
-            }
-        }
-    }
-
-    private boolean isBuilderBaseToResultMethod(JMethod method, String className) {
-        if (method.isStatic() || !returns(method, className)) {
-            return false;
-        }
-        return switch (method.getName()) {
-            case "append", "insert", "delete", "reverse" -> true;
-            default -> false;
-        };
-    }
-
-    private void addBuilderReferenceArgsToResult(AccessPathParser parser,
-                                                 java.util.List<SummaryDetail> summaries,
-                                                 JMethod method) {
-        for (int i = 0; i < method.getParamCount(); i++) {
-            if (isStringBuilderContentArg(method.getParamType(i))) {
-                addJdkSummary(parser, summaries, method,
-                        Integer.toString(i), "result");
-            }
-        }
-    }
-
-    private boolean isStringBuilderContentArg(Type type) {
-        return switch (type.getName()) {
-            case "java.lang.String", "java.lang.Object", "java.lang.CharSequence" -> true;
-            default -> false;
-        };
-    }
-
-    private boolean returns(JMethod method, String typeName) {
-        return method.getReturnType().getName().equals(typeName);
-    }
-
-    private boolean paramIs(JMethod method, int index, String typeName) {
-        return method.getParamType(index).getName().equals(typeName);
     }
 
     private int addJdkContainerSummary(pascal.taie.language.classes.ClassHierarchy hierarchy,
@@ -2843,6 +2791,18 @@ public class SummaryManager {
 
     public long getSummaryAppliedCount() {
         return summaryAppliedCount;
+    }
+
+    public JdkSummaryCatalogStats getJdkSummaryCatalogStats() {
+        return jdkSummaryCatalogStats;
+    }
+
+    public Set<String> getJdkSummaryCatalogMethodSignatures() {
+        return jdkSummaryCatalogMethodSignatures;
+    }
+
+    public List<JdkNoOpSummary> getJdkNoOpSummaries() {
+        return jdkNoOpSummaries;
     }
 
     /**

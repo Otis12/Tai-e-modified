@@ -1,0 +1,96 @@
+schema_version: 1
+id: jdk-common
+scope: jdk
+java_versions: [8, 17]
+description: Common JDK summaries for PTA summary-only mode.
+
+defaults:
+  missing_signature: warn
+  unknown_effect: error
+
+summaries:
+  - method: "<java.lang.String: java.lang.String trim()>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String substring(int)>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String substring(int,int)>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String toLowerCase()>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String toLowerCase(java.util.Locale)>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String toUpperCase()>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String toUpperCase(java.util.Locale)>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String intern()>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String concat(java.lang.String)>"
+    effects:
+      - transfer: { from: base, to: result }
+      - transfer: { from: "0", to: result }
+  - method: "<java.lang.String: java.lang.String replace(char,char)>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String replace(java.lang.CharSequence,java.lang.CharSequence)>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String replaceAll(java.lang.String,java.lang.String)>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String replaceFirst(java.lang.String,java.lang.String)>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.String: java.lang.String valueOf(java.lang.Object)>"
+    effects:
+      - transfer: { from: "0", to: result }
+  - method: "<java.lang.StringBuilder: java.lang.StringBuilder append(java.lang.String)>"
+    effects:
+      - transfer: { from: base, to: result }
+      - transfer: { from: "0", to: result }
+  - method: "<java.lang.StringBuilder: java.lang.StringBuilder append(java.lang.Object)>"
+    effects:
+      - transfer: { from: base, to: result }
+      - transfer: { from: "0", to: result }
+  - method: "<java.lang.StringBuilder: java.lang.StringBuilder append(java.lang.CharSequence)>"
+    effects:
+      - transfer: { from: base, to: result }
+      - transfer: { from: "0", to: result }
+  - method: "<java.lang.StringBuilder: java.lang.String toString()>"
+    effects:
+      - transfer: { from: base, to: result }
+  - method: "<java.lang.StringBuffer: java.lang.StringBuffer append(java.lang.String)>"
+    effects:
+      - transfer: { from: base, to: result }
+      - transfer: { from: "0", to: result }
+  - method: "<java.lang.StringBuffer: java.lang.StringBuffer append(java.lang.Object)>"
+    effects:
+      - transfer: { from: base, to: result }
+      - transfer: { from: "0", to: result }
+  - method: "<java.lang.StringBuffer: java.lang.StringBuffer append(java.lang.CharSequence)>"
+    effects:
+      - transfer: { from: base, to: result }
+      - transfer: { from: "0", to: result }
+  - method: "<java.lang.StringBuffer: java.lang.String toString()>"
+    effects:
+      - transfer: { from: base, to: result }
+
+noops:
+  - selector: "sun.*"
+    reason: "JDK internal implementation details are ignored in summary-only mode."
+  - selector: "jdk.*"
+    reason: "JDK internal implementation details are ignored in summary-only mode."
+  - selector: "com.sun.*"
+    reason: "JDK internal implementation details are ignored in summary-only mode."
+  - method: "<java.lang.Object: int hashCode()>"
+    reason: "Primitive result; no reference propagation."
+  - method: "<java.lang.Object: boolean equals(java.lang.Object)>"
+    reason: "Primitive result; no reference propagation."

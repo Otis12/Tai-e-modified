@@ -1,0 +1,12 @@
+schema_version: 1
+id: jdk8
+scope: jdk
+java_versions: [8]
+description: JDK 8-specific summaries for PTA summary-only mode.
+
+defaults:
+  missing_signature: warn
+  unknown_effect: error
+
+summaries: []
+noops: []
