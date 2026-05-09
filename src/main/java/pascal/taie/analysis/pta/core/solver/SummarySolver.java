@@ -47,9 +47,11 @@ import pascal.taie.analysis.pta.core.heap.Descriptor;
 import pascal.taie.analysis.pta.core.heap.HeapModel;
 import pascal.taie.analysis.pta.core.heap.MockObj;
 import pascal.taie.analysis.pta.core.heap.Obj;
+import pascal.taie.analysis.pta.core.solver.summary.JdkBoundaryClassifier;
 import pascal.taie.analysis.pta.core.solver.summary.SummaryManager;
 import pascal.taie.analysis.pta.core.solver.summary.YamlSummaryConfigProvider;
 import pascal.taie.analysis.pta.plugin.Plugin;
+import pascal.taie.analysis.pta.plugin.taint.TaintProvenanceDebug;
 import pascal.taie.analysis.pta.pts.PointsToSet;
 import pascal.taie.analysis.pta.pts.PointsToSetFactory;
 import pascal.taie.config.AnalysisOptions;
@@ -94,6 +96,12 @@ public class SummarySolver implements Solver {
     public static final String IGNORED_METHOD_SIGNATURES_KEY =
             SummarySolver.class.getName() + ".ignoredMethodSignatures";
 
+    public static final String IGNORED_METHOD_REASONS_KEY =
+            SummarySolver.class.getName() + ".ignoredMethodReasons";
+
+    public static final String SUMMARY_APPLIED_COUNT_KEY =
+            SummarySolver.class.getName() + ".summaryAppliedCount";
+
     /**
      * Descriptor for array objects created implicitly by multiarray instruction.
      */
@@ -124,6 +132,10 @@ public class SummarySolver implements Solver {
      * Whether only analyzes application code.
      */
     private final boolean onlyApp;
+
+    private final boolean jdkSummaryOnly;
+
+    private final JdkBoundaryClassifier jdkBoundaryClassifier;
 
     /**
      * Time limit for pointer analysis (in seconds).
@@ -157,6 +169,8 @@ public class SummarySolver implements Solver {
      */
     private Set<JMethod> ignoredMethods;
 
+    private Map<JMethod, IgnoredReason> ignoredMethodReasons;
+
     private StmtProcessor stmtProcessor;
 
     private PointerAnalysisResult result;
@@ -186,6 +200,10 @@ public class SummarySolver implements Solver {
                 (List<String>) options.get("propagate-types"),
                 typeSystem);
         onlyApp = options.getBoolean("only-app");
+        jdkSummaryOnly = "summary-only".equals(options.getString("jdk-analysis-mode"));
+        jdkBoundaryClassifier = new JdkBoundaryClassifier(
+                (List<String>) options.get("jdk-boundary-extra-includes"),
+                (List<String>) options.get("jdk-boundary-extra-excludes"));
         timeLimit = options.getInt("time-limit");
         summaryGlobalReapplyFallback = options.has("summary-global-reapply-fallback")
                 && options.getBoolean("summary-global-reapply-fallback");
@@ -267,6 +285,7 @@ public class SummarySolver implements Solver {
         reachableMethods = Sets.newSet();
         initializedClasses = Sets.newSet();
         ignoredMethods = Sets.newSet();
+        ignoredMethodReasons = Maps.newMap();
         stmtProcessor = new StmtProcessor();
         //code summary: 初始化摘要管理器
         summaryManager = new SummaryManager(this);
@@ -415,10 +434,14 @@ public class SummarySolver implements Solver {
 
         PointsToSet diff = getPointsToSetOf(pointer).addAllDiff(pointsToSet);
         if (!diff.isEmpty()) {
+            TaintProvenanceDebug.logPropagate("SummarySolver", pointer, diff);
             pointerFlowGraph.getOutEdgesOf(pointer).forEach(edge -> {
                 Pointer target = edge.target();
-                edge.getTransfers().forEach(transfer ->
-                        addPointsTo(target, transfer.apply(edge, diff)));
+                edge.getTransfers().forEach(transfer -> {
+                    PointsToSet targetSet = transfer.apply(edge, diff);
+                    TaintProvenanceDebug.logEdge("SummarySolver", edge, diff, targetSet);
+                    addPointsTo(target, targetSet);
+                });
             });
 
 
@@ -651,6 +674,7 @@ public class SummarySolver implements Solver {
             Context callerCtx = csCallSite.getContext();
             Invoke callSite = csCallSite.getCallSite();
             JMethod callee = csCallee.getMethod();
+            TaintProvenanceDebug.logCallEdge("SummarySolver", callSite, callee, "process");
             if (edge.getKind() != CallKind.OTHER
                     && callSite != null
                     && callSite.isStatic()
@@ -761,8 +785,31 @@ public class SummarySolver implements Solver {
     }
 
     private boolean isIgnored(JMethod method) {
-        return ignoredMethods.contains(method) ||
-                onlyApp && !method.isApplication();
+        IgnoredReason reason = getIgnoredReason(method);
+        if (reason != null) {
+            ignoredMethodReasons.put(method, reason);
+            return true;
+        }
+        return false;
+    }
+
+    private IgnoredReason getIgnoredReason(JMethod method) {
+        if (ignoredMethods.contains(method)) {
+            return IgnoredReason.EXPLICIT_SUMMARY;
+        }
+        if (onlyApp && !method.isApplication()) {
+            return IgnoredReason.ONLY_APP;
+        }
+        if (jdkSummaryOnly && jdkBoundaryClassifier.isJdkPlatformMethod(method)) {
+            return IgnoredReason.JDK_SUMMARY_ONLY;
+        }
+        return null;
+    }
+
+    private enum IgnoredReason {
+        EXPLICIT_SUMMARY,
+        ONLY_APP,
+        JDK_SUMMARY_ONLY
     }
 
     /**
@@ -1012,8 +1059,9 @@ public class SummarySolver implements Solver {
     public void addPFGEdge(PointerFlowEdge edge, Transfer transfer) {
         edge = pointerFlowGraph.addEdge(edge);
         if (edge != null && edge.addTransfer(transfer)) {
-            PointsToSet targetSet = transfer.apply(
-                    edge, getPointsToSetOf(edge.source()));
+            PointsToSet sourceSet = getPointsToSetOf(edge.source());
+            PointsToSet targetSet = transfer.apply(edge, sourceSet);
+            TaintProvenanceDebug.logEdge("SummarySolver", edge, sourceSet, targetSet);
             if (!targetSet.isEmpty()) {
                 addPointsTo(edge.target(), targetSet);
             }
@@ -1146,8 +1194,27 @@ public class SummarySolver implements Solver {
                     ignoredMethods.stream()
                             .map(JMethod::getSignature)
                             .collect(java.util.stream.Collectors.toUnmodifiableSet()));
+            result.storeResult(IGNORED_METHOD_REASONS_KEY,
+                    collectIgnoredMethodReasons());
+            result.storeResult(SUMMARY_APPLIED_COUNT_KEY,
+                    summaryManager.getSummaryAppliedCount());
         }
         return result;
+    }
+
+    private Map<String, String> collectIgnoredMethodReasons() {
+        Map<String, String> reasons = new TreeMap<>();
+        ignoredMethodReasons.forEach((method, reason) ->
+                reasons.put(method.getSignature(), reason.name()));
+        callGraph.reachableMethods()
+                .map(CSMethod::getMethod)
+                .forEach(method -> {
+                    IgnoredReason reason = getIgnoredReason(method);
+                    if (reason != null) {
+                        reasons.put(method.getSignature(), reason.name());
+                    }
+                });
+        return Collections.unmodifiableMap(reasons);
     }
 
     // //code summary: 获取摘要管理器（供外部插件使用）

@@ -17,6 +17,7 @@ import pascal.taie.analysis.pta.core.cs.context.Context;
 import pascal.taie.analysis.pta.core.cs.element.*;
 import pascal.taie.analysis.pta.core.solver.SummaryDebugConfig;
 import pascal.taie.analysis.pta.core.solver.Solver;
+import pascal.taie.analysis.pta.plugin.taint.TaintProvenanceDebug;
 import pascal.taie.analysis.pta.plugin.util.InvokeUtils;
 import pascal.taie.analysis.pta.pts.PointsToSet;
 import pascal.taie.ir.exp.InvokeExp;
@@ -148,6 +149,7 @@ public class SummaryManager {
     private long queryWriteCount;
     private long queryReadCount;
     private long queryAttachCount;
+    private long summaryAppliedCount;
     private long legacyCriteriaFallbackCount;
     private long globalReapplyFallbackCount;
 
@@ -530,18 +532,22 @@ public class SummaryManager {
 //                summaries.size(), calleeMethodRef.getName(), callSite);
 
         for (SummaryDetail summary : summaries.transferSummaries()) {
+            summaryAppliedCount++;
             applySingleSummary(csCallSite, callerContext, callSite, summary);
         }
 
         for (ContainerSummaryDetail summary : summaries.containerSummaries()) {
+            summaryAppliedCount++;
             applyContainerSummary(callerContext, callSite, summary);
         }
 
         for (QuerySummaryDetail summary : summaries.querySummaries()) {
+            summaryAppliedCount++;
             applyQuerySummary(csCallSite, callerContext, callSite, summary);
         }
 
         for (CriteriaSummaryDetail summary : summaries.criteriaSummaries()) {
+            summaryAppliedCount++;
             legacyCriteriaFallbackCount++;
             applyCriteriaSummary(callerContext, callSite, summary);
         }
@@ -569,6 +575,8 @@ public class SummaryManager {
             return;
         }
 
+        TaintProvenanceDebug.logSummary(callSite, summary.method(),
+                "transfer", summary, sourcePts);
 
         // 将 source pts 传播到 target
         propagateToTarget(callSite, context, target, sourcePts);
@@ -2809,6 +2817,7 @@ public class SummaryManager {
                         "  - Active call mappings: %d\n" +
                         "  - Tracked summary callsites: %d\n" +
                         "  - Query read sites: %d\n" +
+                        "  - Summary applications: %d\n" +
                         "  - Query writes / reads / attaches: %d / %d / %d\n" +
                         "  - Legacy criteria fallback count: %d\n" +
                         "  - Global reapply fallback count: %d",
@@ -2823,12 +2832,17 @@ public class SummaryManager {
                 argToActiveCalls.size(),
                 trackedSummaryCallSites.size(),
                 trackedQueryReadSites.size(),
+                summaryAppliedCount,
                 queryWriteCount,
                 queryReadCount,
                 queryAttachCount,
                 legacyCriteriaFallbackCount,
                 globalReapplyFallbackCount
         );
+    }
+
+    public long getSummaryAppliedCount() {
+        return summaryAppliedCount;
     }
 
     /**
@@ -2853,6 +2867,7 @@ public class SummaryManager {
         queryWriteCount = 0;
         queryReadCount = 0;
         queryAttachCount = 0;
+        summaryAppliedCount = 0;
         legacyCriteriaFallbackCount = 0;
         globalReapplyFallbackCount = 0;
         clearSummaryLookupCaches();
