@@ -212,6 +212,7 @@ public class SinkHandler extends Handler {
         };
         return objs.stream()
                 .filter(manager::isTaint)
+                .peek(obj -> TaintProvenanceDebug.logSink(sinkCall, sink, obj))
                 .map(manager::getSourcePoint)
                 .map(sourcePoint -> new TaintFlow(sourcePoint, sinkPoint))
                 .collect(Collectors.toSet());

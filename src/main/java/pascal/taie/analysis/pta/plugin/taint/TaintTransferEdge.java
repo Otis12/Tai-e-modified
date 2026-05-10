@@ -24,17 +24,33 @@ package pascal.taie.analysis.pta.plugin.taint;
 
 import pascal.taie.analysis.pta.core.cs.element.Pointer;
 import pascal.taie.analysis.pta.core.solver.OtherEdge;
+import pascal.taie.ir.stmt.Invoke;
+
+import javax.annotation.Nullable;
 
 public class TaintTransferEdge extends OtherEdge {
 
     private final TaintTransfer transfer;
 
+    private final Invoke callSite;
+
     public TaintTransferEdge(Pointer source, Pointer target, TaintTransfer transfer) {
+        this(source, target, transfer, null);
+    }
+
+    public TaintTransferEdge(Pointer source, Pointer target, TaintTransfer transfer,
+                             @Nullable Invoke callSite) {
         super(source, target);
         this.transfer = transfer;
+        this.callSite = callSite;
     }
 
     public TaintTransfer getTaintTransfer() {
         return transfer;
+    }
+
+    @Nullable
+    public Invoke getCallSite() {
+        return callSite;
     }
 }

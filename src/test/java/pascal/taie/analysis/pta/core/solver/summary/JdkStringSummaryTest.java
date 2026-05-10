@@ -128,13 +128,17 @@ class JdkStringSummaryTest {
                             + "taint-config:" + TAINT_CONFIG);
             Set<TaintFlow> flows = pta.getResult(TaintAnalysis.class.getName(), Set.of());
 
-            assertEquals(3, flows.size(), () -> "Expected one concat, builder, and buffer flow, got " + flows);
+            assertEquals(5, flows.size(), () -> "Expected concat, chained builder/buffer, and detached builder/buffer flows, got " + flows);
             assertTrue(flows.stream().anyMatch(flow -> flow.toString().contains("concatSink")),
                     () -> "Expected String.concat summary flow, got " + flows);
             assertTrue(flows.stream().anyMatch(flow -> flow.toString().contains("builderSink")),
                     () -> "Expected StringBuilder append/toString summary flow, got " + flows);
+            assertTrue(flows.stream().anyMatch(flow -> flow.toString().contains("builderDetachedSink")),
+                    () -> "Expected detached StringBuilder append/toString summary flow, got " + flows);
             assertTrue(flows.stream().anyMatch(flow -> flow.toString().contains("bufferSink")),
                     () -> "Expected StringBuffer append/toString summary flow, got " + flows);
+            assertTrue(flows.stream().anyMatch(flow -> flow.toString().contains("bufferDetachedSink")),
+                    () -> "Expected detached StringBuffer append/toString summary flow, got " + flows);
         } finally {
             World.reset();
         }

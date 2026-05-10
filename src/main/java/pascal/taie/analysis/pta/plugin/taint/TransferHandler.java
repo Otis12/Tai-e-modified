@@ -129,12 +129,13 @@ public class TransferHandler extends OnFlyHandler {
         }
         CSVar csFrom = csManager.getCSVar(context, fromVar);
         CSVar csTo = csManager.getCSVar(context, toVar);
+        logDirectTransfer(callSite, transfer, csFrom, csTo);
         if (from.kind() == IndexRef.Kind.VAR) { // Var -> Var/Array/Field
             Kind kind = switch (to.kind()) {
                 case VAR -> {
                     Transfer tf = getTransferFunction(transfer.type());
                     solver.addPFGEdge(
-                            new TaintTransferEdge(csFrom, csTo, transfer),
+                            new TaintTransferEdge(csFrom, csTo, transfer, callSite),
                             tf);
                     yield null;
                 }
@@ -185,7 +186,8 @@ public class TransferHandler extends OnFlyHandler {
                         .map(csManager::getArrayIndex)
                         .forEach(arrayIndex ->
                                 solver.addPFGEdge(
-                                        new TaintTransferEdge(csVar, arrayIndex, info.transfer()),
+                                        new TaintTransferEdge(csVar, arrayIndex,
+                                                info.transfer(), null),
                                         tf));
             }
             case VAR_TO_FIELD -> {
@@ -194,7 +196,8 @@ public class TransferHandler extends OnFlyHandler {
                         .map(o -> csManager.getInstanceField(o, f))
                         .forEach(oDotF ->
                                 solver.addPFGEdge(
-                                        new TaintTransferEdge(csVar, oDotF, info.transfer()),
+                                        new TaintTransferEdge(csVar, oDotF,
+                                                info.transfer(), null),
                                         tf));
             }
             case ARRAY_TO_VAR -> {
@@ -202,7 +205,8 @@ public class TransferHandler extends OnFlyHandler {
                         .map(csManager::getArrayIndex)
                         .forEach(arrayIndex ->
                                 solver.addPFGEdge(
-                                        new TaintTransferEdge(arrayIndex, csVar, info.transfer()),
+                                        new TaintTransferEdge(arrayIndex, csVar,
+                                                info.transfer(), null),
                                         tf));
             }
             case FIELD_TO_VAR -> {
@@ -211,7 +215,8 @@ public class TransferHandler extends OnFlyHandler {
                         .map(o -> csManager.getInstanceField(o, f))
                         .forEach(oDotF ->
                                 solver.addPFGEdge(
-                                        new TaintTransferEdge(oDotF, csVar, info.transfer()),
+                                        new TaintTransferEdge(oDotF, csVar,
+                                                info.transfer(), null),
                                         tf));
             }
         }
@@ -228,8 +233,23 @@ public class TransferHandler extends OnFlyHandler {
                             .map(source -> manager.makeTaint(source, type))
                             .map(taint -> csManager.getCSObj(emptyContext, taint))
                             .forEach(newTaints::addObject);
+                    if (edge instanceof TaintTransferEdge transferEdge) {
+                        TaintProvenanceDebug.logTransfer(
+                                transferEdge.getCallSite(), transferEdge.getTaintTransfer(),
+                                input, newTaints);
+                    }
                     return newTaints;
                 }));
+    }
+
+    private void logDirectTransfer(Invoke callSite, TaintTransfer transfer,
+                                   CSVar from, CSVar to) {
+        if (!TaintProvenanceDebug.enabled()) {
+            return;
+        }
+        PointsToSet input = solver.getPointsToSetOf(from);
+        PointsToSet output = solver.getPointsToSetOf(to);
+        TaintProvenanceDebug.logTransfer(callSite, transfer, input, output);
     }
 
     public void backPropagateTaint(Var to, Context ctx) {

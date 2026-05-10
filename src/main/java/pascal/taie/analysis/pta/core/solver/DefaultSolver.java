@@ -49,6 +49,7 @@ import pascal.taie.analysis.pta.core.heap.MockObj;
 import pascal.taie.analysis.pta.core.heap.Obj;
 import pascal.taie.analysis.pta.core.solver.summary.SummaryManager;
 import pascal.taie.analysis.pta.plugin.Plugin;
+import pascal.taie.analysis.pta.plugin.taint.TaintProvenanceDebug;
 import pascal.taie.analysis.pta.pts.PointsToSet;
 import pascal.taie.analysis.pta.pts.PointsToSetFactory;
 import pascal.taie.config.AnalysisOptions;
@@ -349,10 +350,14 @@ public class DefaultSolver implements Solver {
         }
         PointsToSet diff = getPointsToSetOf(pointer).addAllDiff(pointsToSet);
         if (!diff.isEmpty()) {
+            TaintProvenanceDebug.logPropagate("DefaultSolver", pointer, diff);
             pointerFlowGraph.getOutEdgesOf(pointer).forEach(edge -> {
                 Pointer target = edge.target();
-                edge.getTransfers().forEach(transfer ->
-                        addPointsTo(target, transfer.apply(edge, diff)));
+                edge.getTransfers().forEach(transfer -> {
+                    PointsToSet targetSet = transfer.apply(edge, diff);
+                    TaintProvenanceDebug.logEdge("DefaultSolver", edge, diff, targetSet);
+                    addPointsTo(target, targetSet);
+                });
             });
         }
         return diff;
@@ -511,6 +516,7 @@ public class DefaultSolver implements Solver {
                 Invoke callSite = edge.getCallSite().getCallSite();
                 Context calleeCtx = csCallee.getContext();
                 JMethod callee = csCallee.getMethod();
+                TaintProvenanceDebug.logCallEdge("DefaultSolver", callSite, callee, "process");
                 InvokeExp invokeExp = callSite.getInvokeExp();
                 // pass arguments to parameters
                 // 检查参数数量是否匹配，避免 IndexOutOfBoundsException
@@ -807,8 +813,9 @@ public class DefaultSolver implements Solver {
     public void addPFGEdge(PointerFlowEdge edge, Transfer transfer) {
         edge = pointerFlowGraph.addEdge(edge);
         if (edge != null && edge.addTransfer(transfer)) {
-            PointsToSet targetSet = transfer.apply(
-                    edge, getPointsToSetOf(edge.source()));
+            PointsToSet sourceSet = getPointsToSetOf(edge.source());
+            PointsToSet targetSet = transfer.apply(edge, sourceSet);
+            TaintProvenanceDebug.logEdge("DefaultSolver", edge, sourceSet, targetSet);
             if (!targetSet.isEmpty()) {
                 addPointsTo(edge.target(), targetSet);
             }
