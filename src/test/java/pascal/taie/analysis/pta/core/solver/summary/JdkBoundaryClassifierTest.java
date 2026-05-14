@@ -104,6 +104,33 @@ class JdkBoundaryClassifierTest {
     }
 
     @Test
+    void extraIncludesMatchClassesExactlyUnlessTheyArePackagePrefixes() {
+        JdkBoundaryClassifier classifier = new JdkBoundaryClassifier(
+                List.of("java.lang.String", "java.util.regex.Pattern"),
+                List.of("java."));
+
+        assertTrue(classifier.isJdkPlatformClass("java.lang.String"));
+        assertTrue(classifier.isJdkPlatformClass("java.util.regex.Pattern$Curly"));
+        assertFalse(classifier.isJdkPlatformClass(
+                "java.lang.StringIndexOutOfBoundsException"));
+        assertFalse(classifier.isJdkPlatformClass("java.lang.Class"));
+    }
+
+    @Test
+    void classifiesSelectedStringBoundaryFamiliesSeparatelyFromAllJdk() {
+        assertTrue(CLASSIFIER.isStringFamilyClass("java.lang.String"));
+        assertTrue(CLASSIFIER.isStringFamilyClass("java.lang.StringBuilder"));
+        assertTrue(CLASSIFIER.isStringFamilyClass("java.lang.StringBuilder$Appendable"));
+        assertTrue(CLASSIFIER.isStringFamilyClass("java.util.regex.Pattern"));
+
+        assertFalse(CLASSIFIER.isStringFamilyClass("java.util.HashMap"));
+        assertFalse(CLASSIFIER.isStringFamilyClass("javax.servlet.http.HttpServletRequest"));
+
+        assertTrue(CLASSIFIER.isJdkContainerClass("java.util.HashMap"));
+        assertFalse(CLASSIFIER.isJdkContainerClass("org.apache.commons.lang3.StringUtils"));
+    }
+
+    @Test
     void jdkSummaryOnlyOptionsAreKnownAndDefaultToNormalMode() {
         AnalysisOptions ptaOptions = AnalysisConfig
                 .parseConfigs(Configs.getAnalysisConfig())

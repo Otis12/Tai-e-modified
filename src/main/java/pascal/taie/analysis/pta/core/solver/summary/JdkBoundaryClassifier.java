@@ -71,6 +71,41 @@ public class JdkBoundaryClassifier {
             "sun.",
             "com.sun.");
 
+    private static final List<String> STRING_FAMILY_CLASSES = List.of(
+            "java.lang.String",
+            "java.lang.AbstractStringBuilder",
+            "java.lang.StringBuilder",
+            "java.lang.StringBuffer",
+            "java.lang.CharSequence",
+            "java.lang.StringLatin1",
+            "java.lang.StringUTF16",
+            "java.lang.StringCoding",
+            "java.lang.StringConcatHelper",
+            "java.lang.invoke.StringConcatFactory",
+            "java.util.StringJoiner",
+            "java.util.StringTokenizer",
+            "java.util.Formatter",
+            "java.util.regex.Pattern",
+            "java.util.regex.Matcher",
+            "java.util.Locale",
+            "java.util.Objects");
+
+    private static final List<String> CONTAINER_PREFIXES = List.of(
+            "java.util.Collection",
+            "java.util.List",
+            "java.util.ArrayList",
+            "java.util.LinkedList",
+            "java.util.Set",
+            "java.util.HashSet",
+            "java.util.LinkedHashSet",
+            "java.util.Map",
+            "java.util.HashMap",
+            "java.util.LinkedHashMap",
+            "java.util.TreeMap",
+            "java.util.Iterator",
+            "java.util.Enumeration",
+            "java.util.Collections");
+
     private final List<String> extraIncludes;
 
     private final List<String> extraExcludes;
@@ -90,7 +125,7 @@ public class JdkBoundaryClassifier {
      */
     public boolean isJdkPlatformClass(String className) {
         Objects.requireNonNull(className, "className");
-        if (matchesAny(className, extraIncludes)) {
+        if (matchesOverrideInclude(className, extraIncludes)) {
             return true;
         }
         if (matchesAny(className, extraExcludes)
@@ -126,6 +161,43 @@ public class JdkBoundaryClassifier {
         return isJdkInternalClass(method.getDeclaringClass().getName());
     }
 
+    /**
+     * @return true if {@code className} is one of the String-family classes
+     * that are useful for selected JDK boundary experiments.
+     */
+    public boolean isStringFamilyClass(String className) {
+        Objects.requireNonNull(className, "className");
+        return STRING_FAMILY_CLASSES.stream()
+                .anyMatch(prefix -> className.equals(prefix)
+                        || className.startsWith(prefix + "$"));
+    }
+
+    /**
+     * @return true if {@code method}'s declaring class is String-family.
+     */
+    public boolean isStringFamilyMethod(JMethod method) {
+        Objects.requireNonNull(method, "method");
+        return isStringFamilyClass(method.getDeclaringClass().getName());
+    }
+
+    /**
+     * @return true if {@code className} is a common JDK container class.
+     */
+    public boolean isJdkContainerClass(String className) {
+        Objects.requireNonNull(className, "className");
+        return isJdkPlatformClass(className)
+                && matchesAny(className, CONTAINER_PREFIXES);
+    }
+
+    /**
+     * @return true if {@code method}'s declaring class is a common JDK
+     * container class.
+     */
+    public boolean isJdkContainerMethod(JMethod method) {
+        Objects.requireNonNull(method, "method");
+        return isJdkContainerClass(method.getDeclaringClass().getName());
+    }
+
     private static List<String> normalize(List<String> prefixes) {
         return Objects.requireNonNull(prefixes, "prefixes")
                 .stream()
@@ -137,5 +209,15 @@ public class JdkBoundaryClassifier {
 
     private static boolean matchesAny(String className, List<String> prefixes) {
         return prefixes.stream().anyMatch(className::startsWith);
+    }
+
+    private static boolean matchesOverrideInclude(String className,
+                                                  List<String> includes) {
+        return includes.stream().anyMatch(include -> {
+            if (include.endsWith(".")) {
+                return className.startsWith(include);
+            }
+            return className.equals(include) || className.startsWith(include + "$");
+        });
     }
 }

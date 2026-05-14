@@ -40,6 +40,7 @@ import javax.tools.StandardLocation;
 import javax.tools.ToolProvider;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -166,6 +167,51 @@ class JdkSummaryOnlyBoundaryTest {
             assertFalse("JDK_SUMMARY_ONLY".equals(ignoredReasons.get(THIRD_PARTY_FORWARD)),
                     "only-app ignored methods must not be labeled as JDK summary-only");
         } finally {
+            World.reset();
+        }
+    }
+
+    @Test
+    void summaryFrontierMethodBoundarySkipsOnlySelectedSignature()
+            throws IOException {
+        Path selectedMethods = Files.createTempFile(
+                "pta-summary-frontier-selected-methods", ".json");
+        Files.writeString(selectedMethods, """
+                {
+                  "selected_methods": [
+                    {
+                      "method_signature": "<java.lang.String: java.lang.String toString()>"
+                    }
+                  ]
+                }
+                """);
+        try {
+            PointerAnalysisResult pta = runBoundaryPTA(
+                    BASE_OPTIONS
+                            + "only-app:false;"
+                            + "jdk-analysis-mode:normal;"
+                            + "pta-summary-frontier-summary-only-methods-file:"
+                            + selectedMethods.toAbsolutePath() + ";");
+
+            assertCallEdge(pta, JDK_TO_STRING);
+
+            Map<String, String> ignoredReasons = pta.getResult(
+                    SummarySolver.IGNORED_METHOD_REASONS_KEY, Map.of());
+            assertEquals("SUMMARY_FRONTIER_ONLY",
+                    ignoredReasons.get(JDK_TO_STRING));
+
+            Invoke jdkCall = getMainInvoke(JDK_TO_STRING);
+            assertNoPointsTo(pta, jdkCall.getResult(),
+                    "method frontier boundary should skip only selected method body");
+
+            assertFalse(ignoredReasons.containsKey(THIRD_PARTY_FORWARD),
+                    "method frontier boundary must not skip unselected non-app helpers");
+            Invoke helperCall = getMainInvoke(THIRD_PARTY_FORWARD);
+            assertContainsPointsTo(pta, helperCall.getResult(),
+                    helperCall.getInvokeExp().getArg(0),
+                    "unselected non-app helper should still be analyzed");
+        } finally {
+            Files.deleteIfExists(selectedMethods);
             World.reset();
         }
     }

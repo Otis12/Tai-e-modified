@@ -40,6 +40,16 @@
     dump: false # whether dump points-to results (with contexts)
     dump-ci: false # whether dump points-to results (without contexts)
     dump-yaml: false # whether dump points-to results in yaml format
+    pta-profile-output: null # path for class-level PTA pollution profile artifacts
+    pta-summary-frontier-profile: null # path for method-level summary frontier ranking
+    pta-summary-frontier-target-recall: 1.0
+    pta-summary-frontier-max-slice-depth: 32
+    pta-summary-frontier-origin-cap: 256
+    pta-summary-frontier-summary-only-methods-file: null # JSON/text selected method signatures to skip for ablation
+    pta-heavy-method-profile: null # path for method-level heavy pollution list artifacts
+    pta-boundary-baseline: null # normal-mode class profile used as boundary delta baseline
+    pta-boundary-selected: null # selected-boundary class profile used for boundary delta
+    pta-boundary-full-summary: null # full-summary-only class profile used for boundary delta
     expected-file: null # path of expected file for comparing results
     reflection-inference: string-constant # | solar | null
     reflection-log: null # path to reflection log, required when reflection option is log

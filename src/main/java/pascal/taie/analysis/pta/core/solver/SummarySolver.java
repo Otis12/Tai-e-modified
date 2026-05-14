@@ -24,6 +24,8 @@ package pascal.taie.analysis.pta.core.solver;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import pascal.taie.World;
 import pascal.taie.analysis.graph.callgraph.CallGraphs;
 import pascal.taie.analysis.graph.callgraph.CallKind;
@@ -47,6 +49,9 @@ import pascal.taie.analysis.pta.core.heap.Descriptor;
 import pascal.taie.analysis.pta.core.heap.HeapModel;
 import pascal.taie.analysis.pta.core.heap.MockObj;
 import pascal.taie.analysis.pta.core.heap.Obj;
+import pascal.taie.analysis.pta.core.solver.profile.PtaHeavyMethodProfiler;
+import pascal.taie.analysis.pta.core.solver.profile.PtaPollutionProfiler;
+import pascal.taie.analysis.pta.core.solver.profile.PtaSummaryFrontierProfiler;
 import pascal.taie.analysis.pta.core.solver.summary.JdkBoundaryClassifier;
 import pascal.taie.analysis.pta.core.solver.summary.SummaryManager;
 import pascal.taie.analysis.pta.core.solver.summary.YamlSummaryConfigProvider;
@@ -83,6 +88,10 @@ import pascal.taie.util.collection.Sets;
 
 
 import java.util.*;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 
@@ -92,6 +101,8 @@ import static pascal.taie.language.classes.Signatures.FINALIZER_REGISTER;
 public class SummarySolver implements Solver {
 
     private static final Logger logger = LogManager.getLogger(SummarySolver.class);
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     public static final String IGNORED_METHOD_SIGNATURES_KEY =
             SummarySolver.class.getName() + ".ignoredMethodSignatures";
@@ -107,6 +118,55 @@ public class SummarySolver implements Solver {
 
     public static final String JDK_SUMMARY_CATALOG_METHOD_SIGNATURES_KEY =
             SummarySolver.class.getName() + ".jdkSummaryCatalogMethodSignatures";
+
+    public static final String PTA_PROFILING_ARTIFACTS_KEY =
+            SummarySolver.class.getName() + ".ptaProfilingArtifacts";
+
+    public static final String PTA_CLASS_PROFILE_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaClassProfilePath";
+
+    public static final String PTA_BOUNDARY_DELTA_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaBoundaryDeltaPath";
+
+    public static final String PTA_SHARED_HUBS_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaSharedHubsPath";
+
+    public static final String PTA_CULPRIT_RANKING_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaCulpritRankingPath";
+
+    public static final String PTA_APP_FRONTIER_METHODS_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaAppFrontierMethodsPath";
+
+    public static final String PTA_APP_ORIGIN_HUBS_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaAppOriginHubsPath";
+
+    public static final String PTA_FRONTIER_SLICES_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaFrontierSlicesPath";
+
+    public static final String PTA_METHOD_HUB_ATTRIBUTION_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaMethodHubAttributionPath";
+
+    public static final String PTA_SUMMARY_FRONTIER_RANKING_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaSummaryFrontierRankingPath";
+
+    public static final String PTA_FRONTIER_HUB_COVERAGE_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaFrontierHubCoveragePath";
+
+    public static final String PTA_CI_METHOD_PROFILE_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaCiMethodProfilePath";
+
+    public static final String PTA_METHOD_CG_PTA_METRICS_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaMethodCgPtaMetricsPath";
+
+    public static final String PTA_HEAVY_POLLUTING_METHODS_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaHeavyPollutingMethodsPath";
+
+    public static final String PTA_HEAVY_POLLUTING_METHODS_MARKDOWN_PATH_KEY =
+            SummarySolver.class.getName()
+                    + ".ptaHeavyPollutingMethodsMarkdownPath";
+
+    public static final String PTA_HEAVY_METHOD_CALLGRAPH_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaHeavyMethodCallgraphPath";
 
     /**
      * Descriptor for array objects created implicitly by multiarray instruction.
@@ -142,6 +202,8 @@ public class SummarySolver implements Solver {
     private final boolean jdkSummaryOnly;
 
     private final JdkBoundaryClassifier jdkBoundaryClassifier;
+
+    private final Set<String> summaryFrontierOnlyMethods;
 
     /**
      * Time limit for pointer analysis (in seconds).
@@ -192,6 +254,12 @@ public class SummarySolver implements Solver {
 
     private long queryFallbackScanNanos;
 
+    private PtaPollutionProfiler pollutionProfiler;
+
+    private PtaSummaryFrontierProfiler summaryFrontierProfiler;
+
+    private PtaHeavyMethodProfiler heavyMethodProfiler;
+
     @SuppressWarnings("unchecked")
     public SummarySolver(AnalysisOptions options, HeapModel heapModel,
                          ContextSelector contextSelector, CSManager csManager) {
@@ -210,6 +278,10 @@ public class SummarySolver implements Solver {
         jdkBoundaryClassifier = new JdkBoundaryClassifier(
                 (List<String>) options.get("jdk-boundary-extra-includes"),
                 (List<String>) options.get("jdk-boundary-extra-excludes"));
+        summaryFrontierOnlyMethods = loadSummaryFrontierOnlyMethods(
+                options.has("pta-summary-frontier-summary-only-methods-file")
+                        ? options.getString("pta-summary-frontier-summary-only-methods-file")
+                        : null);
         timeLimit = options.getInt("time-limit");
         summaryGlobalReapplyFallback = options.has("summary-global-reapply-fallback")
                 && options.getBoolean("summary-global-reapply-fallback");
@@ -295,6 +367,11 @@ public class SummarySolver implements Solver {
         stmtProcessor = new StmtProcessor();
         //code summary: 初始化摘要管理器
         summaryManager = new SummaryManager(this);
+        pollutionProfiler = new PtaPollutionProfiler(options, jdkBoundaryClassifier);
+        summaryFrontierProfiler =
+                new PtaSummaryFrontierProfiler(options, jdkBoundaryClassifier);
+        heavyMethodProfiler =
+                new PtaHeavyMethodProfiler(options, jdkBoundaryClassifier);
         //code summary: 加载硬编码的测试摘要规则（包括 getter/setter 和 JDK 容器方法）
         summaryManager.initHardcodedSummaries();
         loadYamlSummaryConfig();
@@ -440,6 +517,9 @@ public class SummarySolver implements Solver {
 
         PointsToSet diff = getPointsToSetOf(pointer).addAllDiff(pointsToSet);
         if (!diff.isEmpty()) {
+            pollutionProfiler.recordPropagate(pointer, diff);
+            summaryFrontierProfiler.recordPropagate(pointer, diff);
+            heavyMethodProfiler.recordPropagate(pointer, diff);
             TaintProvenanceDebug.logPropagate("SummarySolver", pointer, diff);
             pointerFlowGraph.getOutEdgesOf(pointer).forEach(edge -> {
                 Pointer target = edge.target();
@@ -586,6 +666,11 @@ public class SummarySolver implements Solver {
                             csCallSite, csCallee));
                     // pass receiver object to *this* variable
                     if (!isIgnored(callee)) {
+                        CSVar receiverVar = csManager.getCSVar(context, var);
+                        CSVar calleeThis = csManager.getCSVar(
+                                calleeContext, callee.getIR().getThis());
+                        summaryFrontierProfiler.recordReceiverOrigin(
+                                callSite, callee, receiverVar, calleeThis);
                         addVarPointsTo(calleeContext, callee.getIR().getThis(),
                                 recvObj);
                     }
@@ -641,6 +726,11 @@ public class SummarySolver implements Solver {
                             if (!isIgnored(callee)) {
                                 // Criteria-like summaries still rely on the callee body
                                 // to expose allocations/returns, so preserve receiver flow.
+                                CSVar receiverVar = csManager.getCSVar(context, var);
+                                CSVar calleeThis = csManager.getCSVar(
+                                        calleeContext, callee.getIR().getThis());
+                                summaryFrontierProfiler.recordReceiverOrigin(
+                                        callSite, callee, receiverVar, calleeThis);
                                 addVarPointsTo(calleeContext, callee.getIR().getThis(),
                                         recvObj);
                             }
@@ -659,6 +749,11 @@ public class SummarySolver implements Solver {
                             csCallSite, csCallee));
                     // pass receiver object to *this* variable
                     if (!isIgnored(callee)) {
+                        CSVar receiverVar = csManager.getCSVar(context, var);
+                        CSVar calleeThis = csManager.getCSVar(
+                                calleeContext, callee.getIR().getThis());
+                        summaryFrontierProfiler.recordReceiverOrigin(
+                                callSite, callee, receiverVar, calleeThis);
                         addVarPointsTo(calleeContext, callee.getIR().getThis(),
                                 recvObj);
                     }
@@ -681,6 +776,12 @@ public class SummarySolver implements Solver {
             Invoke callSite = csCallSite.getCallSite();
             JMethod callee = csCallee.getMethod();
             TaintProvenanceDebug.logCallEdge("SummarySolver", callSite, callee, "process");
+            pollutionProfiler.recordCallEdge(edge,
+                    receiverPointsToSize(callerCtx, callSite),
+                    argumentPointsToTotal(callerCtx, callSite),
+                    callSite != null && callSite.getResult() != null);
+            summaryFrontierProfiler.recordCallEdge(edge);
+            heavyMethodProfiler.recordCallEdge(edge);
             if (edge.getKind() != CallKind.OTHER
                     && callSite != null
                     && callSite.isStatic()
@@ -714,6 +815,8 @@ public class SummarySolver implements Solver {
                             Var param = callee.getIR().getParam(i);
                             CSVar argVar = csManager.getCSVar(callerCtx, arg);
                             CSVar paramVar = csManager.getCSVar(calleeCtx, param);
+                            summaryFrontierProfiler.recordCallArgumentOrigin(
+                                    edge, argVar, paramVar);
                             addPFGEdge(argVar, paramVar, FlowKind.PARAMETER_PASSING);
                         }
                     }
@@ -725,6 +828,8 @@ public class SummarySolver implements Solver {
                     for (Var ret : callee.getIR().getReturnVars()) {
                         if (propTypes.isAllowed(ret)) {
                             CSVar csRet = csManager.getCSVar(calleeCtx, ret);
+                            summaryFrontierProfiler.recordReturnOrigin(
+                                    edge, csRet, csLHS);
                             addPFGEdge(csRet, csLHS, FlowKind.RETURN);
                         }
                     }
@@ -776,6 +881,32 @@ public class SummarySolver implements Solver {
         return builder.toString();
     }
 
+    private int receiverPointsToSize(Context callerCtx, Invoke callSite) {
+        if (callSite == null || !(callSite.getInvokeExp() instanceof InvokeInstanceExp instanceExp)) {
+            return 0;
+        }
+        Var base = instanceExp.getBase();
+        if (!propTypes.isAllowed(base)) {
+            return 0;
+        }
+        return getPointsToSetOf(csManager.getCSVar(callerCtx, base)).size();
+    }
+
+    private int argumentPointsToTotal(Context callerCtx, Invoke callSite) {
+        if (callSite == null) {
+            return 0;
+        }
+        int total = 0;
+        InvokeExp invokeExp = callSite.getInvokeExp();
+        for (int i = 0; i < invokeExp.getArgCount(); i++) {
+            Var arg = invokeExp.getArg(i);
+            if (propTypes.isAllowed(arg)) {
+                total += getPointsToSetOf(csManager.getCSVar(callerCtx, arg)).size();
+            }
+        }
+        return total;
+    }
+
     private void debugSummaryProbe(Var recvVar, Invoke callSite, CSObj recvObj,
                                    JMethod callee, String phase) {
         if (!shouldDebugSummaryProbe(callSite)) {
@@ -809,13 +940,77 @@ public class SummarySolver implements Solver {
         if (jdkSummaryOnly && jdkBoundaryClassifier.isJdkPlatformMethod(method)) {
             return IgnoredReason.JDK_SUMMARY_ONLY;
         }
+        if (summaryFrontierOnlyMethods.contains(method.getSignature())) {
+            return IgnoredReason.SUMMARY_FRONTIER_ONLY;
+        }
         return null;
     }
 
     private enum IgnoredReason {
         EXPLICIT_SUMMARY,
         ONLY_APP,
-        JDK_SUMMARY_ONLY
+        JDK_SUMMARY_ONLY,
+        SUMMARY_FRONTIER_ONLY
+    }
+
+    private static Set<String> loadSummaryFrontierOnlyMethods(String path) {
+        if (path == null || path.isBlank()) {
+            return Set.of();
+        }
+        Path file = Path.of(path);
+        if (!Files.isRegularFile(file)) {
+            logger.warn("[pta-summary-frontier] selected method file not found: {}", file);
+            return Set.of();
+        }
+        try {
+            String text = Files.readString(file);
+            Set<String> methods = Sets.newLinkedSet();
+            String trimmed = text.trim();
+            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                collectMethodSignatures(JSON.readTree(text), methods);
+            } else {
+                for (String line : text.split("\\R")) {
+                    String signature = line.trim();
+                    if (!signature.isEmpty() && !signature.startsWith("#")) {
+                        methods.add(signature);
+                    }
+                }
+            }
+            logger.info("[pta-summary-frontier] Loaded {} selected summary frontier methods from {}",
+                    methods.size(), file);
+            return Collections.unmodifiableSet(methods);
+        } catch (IOException e) {
+            throw new UncheckedIOException(
+                    "Failed to read summary frontier selected method file: " + file, e);
+        }
+    }
+
+    private static void collectMethodSignatures(JsonNode node,
+                                                Set<String> methods) {
+        if (node == null || node.isNull()) {
+            return;
+        }
+        if (node.isTextual()) {
+            String value = node.asText();
+            if (value.startsWith("<") && value.endsWith(">")) {
+                methods.add(value);
+            }
+            return;
+        }
+        if (node.isArray()) {
+            node.forEach(child -> collectMethodSignatures(child, methods));
+            return;
+        }
+        if (node.isObject()) {
+            JsonNode signature = node.get("method_signature");
+            if (signature != null && signature.isTextual()) {
+                methods.add(signature.asText());
+            }
+            JsonNode selectedMethods = node.get("selected_methods");
+            if (selectedMethods != null) {
+                collectMethodSignatures(selectedMethods, methods);
+            }
+        }
     }
 
     /**
@@ -872,6 +1067,11 @@ public class SummarySolver implements Solver {
                 // obtain context-sensitive heap object
                 NewExp rvalue = stmt.getRValue();
                 Obj obj = heapModel.getObj(stmt);
+                pollutionProfiler.recordAllocation(csMethod.getMethod(), obj);
+                summaryFrontierProfiler.recordAllocation(
+                        csMethod.getMethod(), obj);
+                heavyMethodProfiler.recordAllocation(
+                        csMethod.getMethod(), obj);
                 Context heapContext = contextSelector.selectHeapContext(csMethod, obj);
                 addVarPointsTo(context, stmt.getLValue(), heapContext, obj);
                 if (rvalue instanceof NewMultiArray) {
@@ -1065,6 +1265,9 @@ public class SummarySolver implements Solver {
     public void addPFGEdge(PointerFlowEdge edge, Transfer transfer) {
         edge = pointerFlowGraph.addEdge(edge);
         if (edge != null && edge.addTransfer(transfer)) {
+            pollutionProfiler.recordPFGEdge(edge);
+            summaryFrontierProfiler.recordPFGEdge(edge);
+            heavyMethodProfiler.recordPFGEdge(edge);
             PointsToSet sourceSet = getPointsToSetOf(edge.source());
             PointsToSet targetSet = transfer.apply(edge, sourceSet);
             TaintProvenanceDebug.logEdge("SummarySolver", edge, sourceSet, targetSet);
@@ -1123,8 +1326,17 @@ public class SummarySolver implements Solver {
             // process new reachable context-sensitive method
             JMethod method = csMethod.getMethod();
             if (isIgnored(method)) {
+                pollutionProfiler.recordReachableMethod(method, false,
+                        ignoredMethodReasons.get(method).name());
+                summaryFrontierProfiler.recordReachableMethod(method, false,
+                        ignoredMethodReasons.get(method).name());
+                heavyMethodProfiler.recordReachableMethod(method, false,
+                        ignoredMethodReasons.get(method).name());
                 return;
             }
+            pollutionProfiler.recordReachableMethod(method, true, null);
+            summaryFrontierProfiler.recordReachableMethod(method, true, null);
+            heavyMethodProfiler.recordReachableMethod(method, true, null);
             processNewMethod(method);
             addStmts(csMethod, method.getIR().getStmts());
             plugin.onNewCSMethod(csMethod);
@@ -1208,6 +1420,44 @@ public class SummarySolver implements Solver {
                     summaryManager.getJdkSummaryCatalogStats());
             result.storeResult(JDK_SUMMARY_CATALOG_METHOD_SIGNATURES_KEY,
                     summaryManager.getJdkSummaryCatalogMethodSignatures());
+            Map<String, String> profilingArtifacts =
+                    Maps.newLinkedHashMap();
+            profilingArtifacts.putAll(pollutionProfiler.writeArtifacts());
+            profilingArtifacts.putAll(summaryFrontierProfiler.writeArtifacts());
+            profilingArtifacts.putAll(heavyMethodProfiler.writeArtifacts());
+            result.storeResult(PTA_PROFILING_ARTIFACTS_KEY,
+                    profilingArtifacts);
+            result.storeResult(PTA_CLASS_PROFILE_PATH_KEY,
+                    profilingArtifacts.get("pta_class_pollution_profile"));
+            result.storeResult(PTA_BOUNDARY_DELTA_PATH_KEY,
+                    profilingArtifacts.get("pta_class_boundary_delta"));
+            result.storeResult(PTA_SHARED_HUBS_PATH_KEY,
+                    profilingArtifacts.get("pta_shared_hubs"));
+            result.storeResult(PTA_CULPRIT_RANKING_PATH_KEY,
+                    profilingArtifacts.get("pta_culprit_ranking"));
+            result.storeResult(PTA_APP_FRONTIER_METHODS_PATH_KEY,
+                    profilingArtifacts.get("pta_app_frontier_methods"));
+            result.storeResult(PTA_APP_ORIGIN_HUBS_PATH_KEY,
+                    profilingArtifacts.get("pta_app_origin_hubs"));
+            result.storeResult(PTA_FRONTIER_SLICES_PATH_KEY,
+                    profilingArtifacts.get("pta_frontier_slices"));
+            result.storeResult(PTA_METHOD_HUB_ATTRIBUTION_PATH_KEY,
+                    profilingArtifacts.get("pta_method_hub_attribution"));
+            result.storeResult(PTA_SUMMARY_FRONTIER_RANKING_PATH_KEY,
+                    profilingArtifacts.get("pta_summary_frontier_ranking"));
+            result.storeResult(PTA_FRONTIER_HUB_COVERAGE_PATH_KEY,
+                    profilingArtifacts.get("pta_frontier_hub_coverage"));
+            result.storeResult(PTA_CI_METHOD_PROFILE_PATH_KEY,
+                    profilingArtifacts.get("pta_ci_method_profile"));
+            result.storeResult(PTA_METHOD_CG_PTA_METRICS_PATH_KEY,
+                    profilingArtifacts.get("pta_method_cg_pta_metrics"));
+            result.storeResult(PTA_HEAVY_POLLUTING_METHODS_PATH_KEY,
+                    profilingArtifacts.get("pta_heavy_polluting_methods"));
+            result.storeResult(PTA_HEAVY_POLLUTING_METHODS_MARKDOWN_PATH_KEY,
+                    profilingArtifacts.get(
+                            "pta_heavy_polluting_methods_markdown"));
+            result.storeResult(PTA_HEAVY_METHOD_CALLGRAPH_PATH_KEY,
+                    profilingArtifacts.get("pta_heavy_method_callgraph"));
         }
         return result;
     }
