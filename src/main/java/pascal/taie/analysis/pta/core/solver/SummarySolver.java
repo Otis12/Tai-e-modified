@@ -168,6 +168,9 @@ public class SummarySolver implements Solver {
     public static final String PTA_HEAVY_METHOD_CALLGRAPH_PATH_KEY =
             SummarySolver.class.getName() + ".ptaHeavyMethodCallgraphPath";
 
+    public static final String PTA_TOP_POLLUTING_METHODS_PATH_KEY =
+            SummarySolver.class.getName() + ".ptaTopPollutingMethodsPath";
+
     /**
      * Descriptor for array objects created implicitly by multiarray instruction.
      */
@@ -1458,6 +1461,8 @@ public class SummarySolver implements Solver {
                             "pta_heavy_polluting_methods_markdown"));
             result.storeResult(PTA_HEAVY_METHOD_CALLGRAPH_PATH_KEY,
                     profilingArtifacts.get("pta_heavy_method_callgraph"));
+            result.storeResult(PTA_TOP_POLLUTING_METHODS_PATH_KEY,
+                    profilingArtifacts.get("pta_top_polluting_methods"));
         }
         return result;
     }

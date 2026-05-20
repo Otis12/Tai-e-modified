@@ -23,6 +23,8 @@
 package pascal.taie.analysis.pta;
 
 import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import pascal.taie.World;
 import pascal.taie.analysis.ProgramAnalysis;
 import pascal.taie.analysis.pta.core.cs.element.MapBasedCSManager;
@@ -60,14 +62,23 @@ import pascal.taie.analysis.pta.toolkit.zipper.Zipper;
 import pascal.taie.config.AnalysisConfig;
 import pascal.taie.config.AnalysisOptions;
 import pascal.taie.config.ConfigException;
+import pascal.taie.language.classes.ClassHierarchy;
+import pascal.taie.language.classes.JMethod;
 import pascal.taie.util.AnalysisException;
 import pascal.taie.util.Timer;
 
+import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class PointerAnalysis extends ProgramAnalysis<PointerAnalysisResult> {
+
+    private static final Logger logger = LogManager.getLogger(PointerAnalysis.class);
 
     public static final String ID = "pta";
 
@@ -90,6 +101,12 @@ public class PointerAnalysis extends ProgramAnalysis<PointerAnalysisResult> {
             if (advanced.equals("collection")) {
                 selector = ContextSelectorFactory.makeSelectiveSelector(cs,
                         new CollectionMethods(World.get().getClassHierarchy()).get());
+            } else if (advanced.startsWith("selective-2call=")) {
+                String configPath = advanced.substring("selective-2call=".length());
+                Set<JMethod> methods = loadSelectiveMethods(configPath);
+                if (!methods.isEmpty()) {
+                    selector = ContextSelectorFactory.makeSelectiveSelector(cs, methods);
+                }
             } else {
                 // run context-insensitive analysis as pre-analysis
                 PointerAnalysisResult preResult = runAnalysis(heapModel,
@@ -214,6 +231,47 @@ public class PointerAnalysis extends ProgramAnalysis<PointerAnalysisResult> {
                 throw new AnalysisException(
                         "Failed to create plugin instance for " + pluginClass, e);
             }
+        }
+    }
+
+    private static Set<JMethod> loadSelectiveMethods(String configPath) {
+        Path path = Path.of(configPath);
+        if (!Files.exists(path)) {
+            logger.warn("Selective 2-call config not found: {}", configPath);
+            return Set.of();
+        }
+        try {
+            List<String> lines = Files.readAllLines(path);
+            ClassHierarchy hierarchy = World.get().getClassHierarchy();
+            Set<JMethod> result = new HashSet<>();
+            boolean inMethods = false;
+            for (String line : lines) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("methods:")) {
+                    inMethods = true;
+                    continue;
+                }
+                if (inMethods && trimmed.startsWith("- ")) {
+                    String sig = trimmed.substring(2).trim();
+                    if (sig.startsWith("\"") && sig.endsWith("\"")) {
+                        sig = sig.substring(1, sig.length() - 1);
+                    }
+                    JMethod method = hierarchy.getMethod(sig);
+                    if (method != null) {
+                        result.add(method);
+                    } else {
+                        logger.warn("Selective 2-call: method not found: {}", sig);
+                    }
+                } else if (inMethods && !trimmed.isEmpty() && !trimmed.startsWith("#")) {
+                    break;
+                }
+            }
+            logger.info("Selective 2-call: loaded {} methods from {}",
+                    result.size(), configPath);
+            return result;
+        } catch (IOException e) {
+            logger.error("Failed to read selective 2-call config: {}", configPath, e);
+            return Set.of();
         }
     }
 }

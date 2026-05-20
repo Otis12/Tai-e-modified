@@ -47,7 +47,9 @@ import pascal.taie.analysis.pta.core.heap.Descriptor;
 import pascal.taie.analysis.pta.core.heap.HeapModel;
 import pascal.taie.analysis.pta.core.heap.MockObj;
 import pascal.taie.analysis.pta.core.heap.Obj;
+import pascal.taie.analysis.pta.core.solver.profile.PtaHeavyMethodProfiler;
 import pascal.taie.analysis.pta.core.solver.summary.SummaryManager;
+import pascal.taie.analysis.pta.core.solver.summary.JdkBoundaryClassifier;
 import pascal.taie.analysis.pta.plugin.Plugin;
 import pascal.taie.analysis.pta.plugin.taint.TaintProvenanceDebug;
 import pascal.taie.analysis.pta.pts.PointsToSet;
@@ -160,6 +162,10 @@ public class DefaultSolver implements Solver {
 
     private PointerAnalysisResult result;
 
+    private final JdkBoundaryClassifier jdkBoundaryClassifier;
+
+    private PtaHeavyMethodProfiler heavyMethodProfiler;
+
 
 
     @SuppressWarnings("unchecked")
@@ -176,6 +182,9 @@ public class DefaultSolver implements Solver {
                 (List<String>) options.get("propagate-types"),
                 typeSystem);
         onlyApp = options.getBoolean("only-app");
+        jdkBoundaryClassifier = new JdkBoundaryClassifier(
+                (List<String>) options.get("jdk-boundary-extra-includes"),
+                (List<String>) options.get("jdk-boundary-extra-excludes"));
         timeLimit = options.getInt("time-limit");
     }
 
@@ -256,6 +265,8 @@ public class DefaultSolver implements Solver {
         initializedClasses = Sets.newSet();
         ignoredMethods = Sets.newSet();
         stmtProcessor = new StmtProcessor();
+        heavyMethodProfiler =
+                new PtaHeavyMethodProfiler(options, jdkBoundaryClassifier);
 
         isTimeout = false;
         if (timeLimit != UNLIMITED) {
@@ -350,6 +361,7 @@ public class DefaultSolver implements Solver {
         }
         PointsToSet diff = getPointsToSetOf(pointer).addAllDiff(pointsToSet);
         if (!diff.isEmpty()) {
+            heavyMethodProfiler.recordPropagate(pointer, diff);
             TaintProvenanceDebug.logPropagate("DefaultSolver", pointer, diff);
             pointerFlowGraph.getOutEdgesOf(pointer).forEach(edge -> {
                 Pointer target = edge.target();
@@ -510,6 +522,7 @@ public class DefaultSolver implements Solver {
             // process new call edge
             CSMethod csCallee = edge.getCallee();
             addCSMethod(csCallee);
+            heavyMethodProfiler.recordCallEdge(edge);
             if (edge.getKind() != CallKind.OTHER
                     && !isIgnored(csCallee.getMethod())) {
                 Context callerCtx = edge.getCallSite().getContext();
@@ -620,6 +633,8 @@ public class DefaultSolver implements Solver {
                 // obtain context-sensitive heap object
                 NewExp rvalue = stmt.getRValue();
                 Obj obj = heapModel.getObj(stmt);
+                heavyMethodProfiler.recordAllocation(
+                        csMethod.getMethod(), obj);
                 Context heapContext = contextSelector.selectHeapContext(csMethod, obj);
                 addVarPointsTo(context, stmt.getLValue(), heapContext, obj);
                 if (rvalue instanceof NewMultiArray) {
@@ -813,6 +828,7 @@ public class DefaultSolver implements Solver {
     public void addPFGEdge(PointerFlowEdge edge, Transfer transfer) {
         edge = pointerFlowGraph.addEdge(edge);
         if (edge != null && edge.addTransfer(transfer)) {
+            heavyMethodProfiler.recordPFGEdge(edge);
             PointsToSet sourceSet = getPointsToSetOf(edge.source());
             PointsToSet targetSet = transfer.apply(edge, sourceSet);
             TaintProvenanceDebug.logEdge("DefaultSolver", edge, sourceSet, targetSet);
@@ -871,8 +887,11 @@ public class DefaultSolver implements Solver {
             // process new reachable context-sensitive method
             JMethod method = csMethod.getMethod();
             if (isIgnored(method)) {
+                heavyMethodProfiler.recordReachableMethod(method, false,
+                        ignoredReason(method));
                 return;
             }
+            heavyMethodProfiler.recordReachableMethod(method, true, null);
             processNewMethod(method);
             addStmts(csMethod, method.getIR().getStmts());
             plugin.onNewCSMethod(csMethod);
@@ -938,7 +957,29 @@ public class DefaultSolver implements Solver {
             result = new PointerAnalysisResultImpl(
                     propTypes, csManager, heapModel,
                     callGraph, pointerFlowGraph);
+            Map<String, String> profilingArtifacts =
+                    heavyMethodProfiler.writeArtifacts();
+            result.storeResult(SummarySolver.PTA_PROFILING_ARTIFACTS_KEY,
+                    profilingArtifacts);
+            result.storeResult(SummarySolver.PTA_CI_METHOD_PROFILE_PATH_KEY,
+                    profilingArtifacts.get("pta_ci_method_profile"));
+            result.storeResult(SummarySolver.PTA_METHOD_CG_PTA_METRICS_PATH_KEY,
+                    profilingArtifacts.get("pta_method_cg_pta_metrics"));
+            result.storeResult(SummarySolver.PTA_HEAVY_POLLUTING_METHODS_PATH_KEY,
+                    profilingArtifacts.get("pta_heavy_polluting_methods"));
+            result.storeResult(
+                    SummarySolver.PTA_HEAVY_POLLUTING_METHODS_MARKDOWN_PATH_KEY,
+                    profilingArtifacts.get(
+                            "pta_heavy_polluting_methods_markdown"));
+            result.storeResult(SummarySolver.PTA_HEAVY_METHOD_CALLGRAPH_PATH_KEY,
+                    profilingArtifacts.get("pta_heavy_method_callgraph"));
+            result.storeResult(SummarySolver.PTA_TOP_POLLUTING_METHODS_PATH_KEY,
+                    profilingArtifacts.get("pta_top_polluting_methods"));
         }
         return result;
+    }
+
+    private String ignoredReason(JMethod method) {
+        return onlyApp && !method.isApplication() ? "ONLY_APP" : "IGNORED";
     }
 }

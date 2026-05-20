@@ -34,6 +34,7 @@ import pascal.taie.analysis.pta.core.cs.element.CSVar;
 import pascal.taie.analysis.pta.core.cs.element.InstanceField;
 import pascal.taie.analysis.pta.core.cs.element.Pointer;
 import pascal.taie.analysis.pta.core.cs.element.StaticField;
+import pascal.taie.analysis.pta.core.heap.MockObj;
 import pascal.taie.analysis.pta.core.heap.Obj;
 import pascal.taie.analysis.pta.core.solver.PointerFlowEdge;
 import pascal.taie.analysis.pta.core.solver.summary.JdkBoundaryClassifier;
@@ -94,9 +95,14 @@ public class PtaHeavyMethodProfiler {
     public static final String DEFAULT_HEAVY_METHOD_CALLGRAPH_FILE =
             "pta-heavy-method-callgraph.json";
 
+    public static final String DEFAULT_TOP_POLLUTING_METHODS_FILE =
+            "pta-top-polluting-methods.json";
+
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private static final int MAX_TOP_NEIGHBORS = 8;
+
+    private static final int TOP_ANCHOR_MIN_INCOMING_CALL_EDGES = 5;
 
     private final AnalysisOptions options;
 
@@ -107,6 +113,12 @@ public class PtaHeavyMethodProfiler {
     private final List<CallEdgeInfo> callEdges = new ArrayList<>();
 
     private final Map<Obj, String> allocationOwners = new IdentityHashMap<>();
+
+    private final Map<Obj, Set<Obj>> objectNestedTaintObjects =
+            new IdentityHashMap<>();
+
+    private final Map<Obj, Set<MethodStats>> returnObjectOwners =
+            new IdentityHashMap<>();
 
     private final Set<String> seenPfgEdges = Sets.newLinkedSet();
 
@@ -211,6 +223,7 @@ public class PtaHeavyMethodProfiler {
         if (pointer == null || diff == null || diff.isEmpty()) {
             return;
         }
+        recordNestedTaintObjects(pointer, diff);
         String owner = ownerMethodOfPointer(pointer);
         if (owner == null) {
             recordAllocationConsumers(pointer, diff);
@@ -243,11 +256,13 @@ public class PtaHeavyMethodProfiler {
                 DEFAULT_HEAVY_METHODS_MARKDOWN_FILE);
         Path callGraphPath = artifactDir.resolve(
                 DEFAULT_HEAVY_METHOD_CALLGRAPH_FILE);
+        Path topPath = artifactDir.resolve(DEFAULT_TOP_POLLUTING_METHODS_FILE);
 
         writeJson(profilePath, methodProfilePayload());
         writeJson(metricsPath, metricsPayload());
         writeJson(heavyPath, heavyMethodsPayload());
         writeJson(callGraphPath, heavyMethodCallGraphPayload());
+        writeJson(topPath, topPollutingMethodsPayload());
         writeMarkdown(markdownPath, heavyMethodsMarkdown());
 
         Map<String, String> paths = Maps.newLinkedHashMap();
@@ -257,6 +272,7 @@ public class PtaHeavyMethodProfiler {
         paths.put("pta_heavy_polluting_methods_markdown",
                 markdownPath.toString());
         paths.put("pta_heavy_method_callgraph", callGraphPath.toString());
+        paths.put("pta_top_polluting_methods", topPath.toString());
         return paths;
     }
 
@@ -349,8 +365,68 @@ public class PtaHeavyMethodProfiler {
             stats.localPtsMax = Math.max(stats.localPtsMax, currentPtsSize);
         }
         if (ir.getReturnVars().contains(var)) {
-            diff.forEach(obj -> stats.returnObjects.add(obj.getObject()));
+            diff.forEach(obj -> recordReturnObject(stats, obj.getObject()));
         }
+    }
+
+    private void recordReturnObject(MethodStats stats, Obj obj) {
+        stats.returnObjects.add(obj);
+        if (isTaintObj(obj)) {
+            stats.returnTaintObjects.add(obj);
+        }
+        returnObjectOwners.computeIfAbsent(obj,
+                        ignored -> Collections.newSetFromMap(
+                                new IdentityHashMap<>()))
+                .add(stats);
+        Set<Obj> nestedTaints = objectNestedTaintObjects.get(obj);
+        if (nestedTaints != null) {
+            stats.returnTaintObjects.addAll(nestedTaints);
+        }
+    }
+
+    private void recordNestedTaintObjects(Pointer pointer, PointsToSet diff) {
+        Obj baseObj = nestedBaseObject(pointer);
+        if (baseObj == null) {
+            return;
+        }
+        Set<Obj> taints = taintObjects(diff);
+        if (taints.isEmpty()) {
+            return;
+        }
+        objectNestedTaintObjects.computeIfAbsent(baseObj,
+                        ignored -> Collections.newSetFromMap(
+                                new IdentityHashMap<>()))
+                .addAll(taints);
+        Set<MethodStats> owners = returnObjectOwners.get(baseObj);
+        if (owners != null) {
+            owners.forEach(owner -> owner.returnTaintObjects.addAll(taints));
+        }
+    }
+
+    private static Obj nestedBaseObject(Pointer pointer) {
+        if (pointer instanceof ArrayIndex arrayIndex) {
+            return arrayIndex.getArray().getObject();
+        }
+        if (pointer instanceof InstanceField instanceField) {
+            return instanceField.getBase().getObject();
+        }
+        return null;
+    }
+
+    private static Set<Obj> taintObjects(PointsToSet pointsToSet) {
+        Set<Obj> taints = Collections.newSetFromMap(new IdentityHashMap<>());
+        pointsToSet.forEach(csObj -> {
+            Obj obj = csObj.getObject();
+            if (isTaintObj(obj)) {
+                taints.add(obj);
+            }
+        });
+        return taints;
+    }
+
+    private static boolean isTaintObj(Obj obj) {
+        return obj instanceof MockObj mockObj
+                && "TaintObj".equals(mockObj.getDescriptor().string());
     }
 
     private void recordAllocationConsumers(Pointer pointer, PointsToSet diff) {
@@ -412,67 +488,30 @@ public class PtaHeavyMethodProfiler {
                 .toList();
         Thresholds thresholds = Thresholds.from(candidates);
         double maxIncoming = max(candidates, m -> m.incomingCallEdgeCount);
-        double maxAppCallsites = max(candidates,
-                MethodStats::appReachableCallsiteCount);
-        double maxAppCallers = max(candidates,
-                m -> m.appReachableCallers.size());
+        double maxReturnTaintObjects = max(candidates,
+                MethodStats::returnTaintObjCount);
         double maxReturnPts = max(candidates, MethodStats::returnPtsSize);
-        double maxLocalPts = max(candidates, m -> m.localPtsMax);
         double maxMethodPts = max(candidates, m -> m.methodPtsTotal);
-        double maxPfgDegree = max(candidates, MethodStats::pfgDegreeTotal);
-        double maxReturnEdges = max(candidates, m -> m.returnEdgeCount);
-        double maxFieldArray = max(candidates, MethodStats::fieldArrayEdgeCount);
+        double maxParamPts = max(candidates, m -> m.paramPtsMax);
 
         List<HeavyMethod> selected = new ArrayList<>();
         for (MethodStats method : candidates) {
-            List<String> reasons = new ArrayList<>();
-            Map<String, Object> triggered = Maps.newLinkedHashMap();
-            addThresholdReason(reasons, triggered,
-                    "incoming_call_edge_count", method.incomingCallEdgeCount,
-                    thresholds.incomingCallEdgeCount);
-            addThresholdReason(reasons, triggered,
-                    "app_reachable_callsite_count",
-                    method.appReachableCallsiteCount(),
-                    thresholds.appReachableCallsiteCount);
-            addThresholdReason(reasons, triggered,
-                    "return_pts_size", method.returnPtsSize(),
-                    thresholds.returnPtsSize);
-            addThresholdReason(reasons, triggered,
-                    "local_pts_max", method.localPtsMax,
-                    thresholds.localPtsMax);
-            addThresholdReason(reasons, triggered,
-                    "method_pts_total", method.methodPtsTotal,
-                    thresholds.methodPtsTotal);
-            addThresholdReason(reasons, triggered,
-                    "pfg_degree_total", method.pfgDegreeTotal(),
-                    thresholds.pfgDegreeTotal);
-            addThresholdReason(reasons, triggered,
-                    "return_edge_count", method.returnEdgeCount,
-                    thresholds.returnEdgeCount);
-            addThresholdReason(reasons, triggered,
-                    "field_array_edge_count", method.fieldArrayEdgeCount(),
-                    thresholds.fieldArrayEdgeCount);
-            if (method.receiverStateEffect && method.hasNonTrivialEvidence()) {
-                reasons.add("receiver_state_effect with nontrivial CG/PTA");
-                triggered.put("receiver_state_effect", true);
-            }
-            if (reasons.isEmpty()) {
+            if (method.returnTaintObjCount() <= 0) {
                 continue;
             }
-            double score = 1.5 * normalize(method.incomingCallEdgeCount,
+            List<String> reasons = new ArrayList<>();
+            Map<String, Object> triggered = Maps.newLinkedHashMap();
+            addPositiveReason(reasons, triggered, "return_taint_obj_count",
+                    method.returnTaintObjCount(), 1);
+            addThresholdReason(reasons, triggered, "method_pts_total",
+                    method.methodPtsTotal, thresholds.methodPtsTotal);
+            double score = 2.0 * normalize(method.returnTaintObjCount(),
+                    maxReturnTaintObjects)
+                    + 2.0 * normalize(method.methodPtsTotal, maxMethodPts)
+                    + 1.5 * normalize(method.incomingCallEdgeCount,
                     maxIncoming)
-                    + 2.0 * normalize(method.appReachableCallsiteCount(),
-                    maxAppCallsites)
-                    + 1.5 * normalize(method.appReachableCallers.size(),
-                    maxAppCallers)
-                    + 2.0 * normalize(method.returnPtsSize(), maxReturnPts)
-                    + 1.5 * normalize(method.localPtsMax, maxLocalPts)
-                    + 1.5 * normalize(method.methodPtsTotal, maxMethodPts)
-                    + 1.5 * normalize(method.pfgDegreeTotal(), maxPfgDegree)
-                    + 2.0 * normalize(method.returnEdgeCount, maxReturnEdges)
-                    + 1.5 * normalize(method.fieldArrayEdgeCount(),
-                    maxFieldArray)
-                    + (method.receiverStateEffect ? 1.0 : 0.0);
+                    + 1.0 * normalize(method.returnPtsSize(), maxReturnPts)
+                    + 0.5 * normalize(method.paramPtsMax, maxParamPts);
             TfProxyEvidence tfProxy = tfProxyEvidence(method, score,
                     thresholds);
             selected.add(new HeavyMethod(method, score, tfProxy, reasons,
@@ -487,11 +526,8 @@ public class PtaHeavyMethodProfiler {
             ptaScoreOrder.get(i).ptaScoreRank = i + 1;
         }
         selected.sort(Comparator
-                .comparingDouble((HeavyMethod m) -> m.tfProxy.score())
+                .comparingDouble((HeavyMethod m) -> m.score)
                 .reversed()
-                .thenComparing(Comparator
-                        .comparingDouble((HeavyMethod m) -> m.score)
-                        .reversed())
                 .thenComparing(m -> m.stats.signature));
         for (int i = 0; i < selected.size(); i++) {
             selected.get(i).rank = i + 1;
@@ -573,6 +609,13 @@ public class PtaHeavyMethodProfiler {
                 || typeName.equals("java.util.Enumeration");
     }
 
+    private void addPositiveReason(List<String> reasons,
+                                   Map<String, Object> triggered,
+                                   String metric, int value, int threshold) {
+        reasons.add(metric + " > 0");
+        triggered.put(metric, Map.of("value", value, "threshold", threshold));
+    }
+
     private void addThresholdReason(List<String> reasons,
                                     Map<String, Object> triggered,
                                     String metric, int value, int threshold) {
@@ -607,14 +650,15 @@ public class PtaHeavyMethodProfiler {
         Map<String, Object> payload = basePayload();
         payload.put("stage", "C");
         payload.put("selection_strategy",
-                "reachable && body_processed && p95 CG/PTA footprint reasons");
+                "reachable && body_processed && return_taint_obj_count > 0");
         payload.put("ranking_strategy",
-                "tf_proxy_score desc, then PTA score desc");
+                "2.0*return_taint_obj_count + 2.0*method_pts_total "
+                        + "+ 1.5*incoming_call_edge_count "
+                        + "+ 1.0*return_pts_size + 0.5*param_pts_max, "
+                        + "normalized by body-processed maxima");
         payload.put("tf_proxy_score",
-                "PTA score plus bonuses for array/container returns, "
-                        + "array-local flow, param-local flow, "
-                        + "receiver-state flow, and capped "
-                        + "array/param/local footprint");
+                "legacy diagnostic field; not used for PM3 selection "
+                        + "or ranking");
         payload.put("included_categories",
                 "app, third-party, jdk, jdk-internal, other-jdk, unknown");
         payload.put("heavy_method_count", heavyMethods.size());
@@ -674,6 +718,150 @@ public class PtaHeavyMethodProfiler {
         return payload;
     }
 
+    private Object topPollutingMethodsPayload() {
+        Map<String, Object> payload = basePayload();
+        payload.put("stage", "TOP");
+        payload.put("analysis", "pta-top-polluting-methods");
+        payload.put("top_rule",
+                "heavy top-anchor method with no incoming edge from another "
+                        + "top-anchor method");
+        payload.put("top_anchor_strategy",
+                "heavy method with incoming_call_edge_count >= "
+                        + TOP_ANCHOR_MIN_INCOMING_CALL_EDGES);
+
+        Set<String> heavySignatures = heavyMethodSignatures();
+        List<CallEdgeInfo> heavyEdges = heavyEdges(heavySignatures, false);
+        Map<String, Set<String>> outgoing = heavyOutgoingMap(heavySignatures,
+                heavyEdges);
+        List<HeavyMethod> anchorMethods = topAnchorMethods();
+        Set<String> anchorSignatures = anchorMethods.stream()
+                .map(method -> method.stats.signature)
+                .collect(java.util.stream.Collectors.toCollection(
+                        Sets::newLinkedSet));
+        Set<String> methodsWithAnchorCallers = methodsWithCallers(heavyEdges,
+                anchorSignatures);
+        List<HeavyMethod> topMethods = anchorMethods.stream()
+                .filter(method -> !methodsWithAnchorCallers.contains(
+                        method.stats.signature))
+                .toList();
+        double totalHeavyScore = heavyMethods.stream()
+                .mapToDouble(method -> method.score)
+                .sum();
+        double coveredHeavyScore = coveredHeavyScore(topMethods, outgoing);
+
+        payload.put("heavy_method_count", heavyMethods.size());
+        payload.put("top_anchor_min_incoming_call_edge_count",
+                TOP_ANCHOR_MIN_INCOMING_CALL_EDGES);
+        payload.put("top_anchor_method_count", anchorMethods.size());
+        payload.put("top_method_count", topMethods.size());
+        payload.put("total_heavy_score", totalHeavyScore);
+        payload.put("covered_heavy_score", coveredHeavyScore);
+        payload.put("coverage_recall", totalHeavyScore <= 0.0
+                ? 0.0 : coveredHeavyScore / totalHeavyScore);
+        payload.put("top_polluting_methods", topMethods.stream()
+                .map(method -> topMethodMap(method, outgoing))
+                .toList());
+        payload.put("uncovered_heavy_methods", uncoveredHeavyMethods(
+                topMethods, outgoing).stream()
+                .map(this::methodRef)
+                .toList());
+        return payload;
+    }
+
+    private List<HeavyMethod> topAnchorMethods() {
+        return heavyMethods.stream()
+                .filter(method -> method.stats.incomingCallEdgeCount
+                        >= TOP_ANCHOR_MIN_INCOMING_CALL_EDGES)
+                .toList();
+    }
+
+    private Map<String, Set<String>> heavyOutgoingMap(Set<String> heavySignatures,
+                                                      List<CallEdgeInfo> edges) {
+        Map<String, Set<String>> outgoing = Maps.newLinkedHashMap();
+        for (String signature : heavySignatures) {
+            outgoing.put(signature, Sets.newLinkedSet());
+        }
+        for (CallEdgeInfo edge : edges) {
+            outgoing.computeIfAbsent(edge.caller, ignored -> Sets.newLinkedSet())
+                    .add(edge.callee);
+        }
+        return outgoing;
+    }
+
+    private Map<String, Object> topMethodMap(HeavyMethod method,
+                                             Map<String, Set<String>> outgoing) {
+        Set<String> covered = reachableHeavyMethods(method.stats.signature,
+                outgoing);
+        double coveredScore = covered.stream()
+                .map(this::heavyMethodBySignature)
+                .filter(Objects::nonNull)
+                .mapToDouble(heavy -> heavy.score)
+                .sum();
+        Map<String, Object> item = method.toMap();
+        item.put("top_reason",
+                "incoming_call_edge_count >= "
+                        + TOP_ANCHOR_MIN_INCOMING_CALL_EDGES
+                        + " and no incoming top-anchor caller");
+        item.put("covered_heavy_method_count", covered.size());
+        item.put("covered_heavy_score", coveredScore);
+        item.put("downstream_heavy_methods", covered.stream()
+                .filter(signature -> !signature.equals(method.stats.signature))
+                .map(this::methodRef)
+                .toList());
+        item.put("scc_entry_selected", false);
+        item.put("ambiguous", false);
+        return item;
+    }
+
+    private double coveredHeavyScore(List<HeavyMethod> topMethods,
+                                     Map<String, Set<String>> outgoing) {
+        return topMethods.stream()
+                .flatMap(method -> reachableHeavyMethods(method.stats.signature,
+                        outgoing).stream())
+                .distinct()
+                .map(this::heavyMethodBySignature)
+                .filter(Objects::nonNull)
+                .mapToDouble(method -> method.score)
+                .sum();
+    }
+
+    private Set<String> uncoveredHeavyMethods(List<HeavyMethod> topMethods,
+                                              Map<String, Set<String>> outgoing) {
+        Set<String> covered = Sets.newLinkedSet();
+        topMethods.forEach(method -> covered.addAll(reachableHeavyMethods(
+                method.stats.signature, outgoing)));
+        return heavyMethods.stream()
+                .map(method -> method.stats.signature)
+                .filter(signature -> !covered.contains(signature))
+                .collect(java.util.stream.Collectors.toCollection(
+                        Sets::newLinkedSet));
+    }
+
+    private Set<String> reachableHeavyMethods(String start,
+                                              Map<String, Set<String>> outgoing) {
+        Set<String> reached = Sets.newLinkedSet();
+        Queue<String> queue = new ArrayDeque<>();
+        if (reached.add(start)) {
+            queue.add(start);
+        }
+        while (!queue.isEmpty()) {
+            String current = queue.remove();
+            for (String callee : outgoing.getOrDefault(current, Set.of())) {
+                if (reached.add(callee)) {
+                    queue.add(callee);
+                }
+            }
+        }
+        return reached;
+    }
+
+    private HeavyMethod heavyMethodBySignature(String signature) {
+        return heavyMethods.stream()
+                .filter(method -> method.stats.signature.equals(signature))
+                .findFirst()
+                .orElse(null);
+    }
+
     private Set<String> heavyMethodSignatures() {
         return heavyMethods.stream()
                 .map(method -> method.stats.signature)
@@ -715,6 +903,16 @@ public class PtaHeavyMethodProfiler {
 
     private Set<String> methodsWithCallers(List<CallEdgeInfo> edges) {
         return edges.stream()
+                .map(CallEdgeInfo::callee)
+                .collect(java.util.stream.Collectors.toCollection(
+                        Sets::newLinkedSet));
+    }
+
+    private Set<String> methodsWithCallers(List<CallEdgeInfo> edges,
+                                           Set<String> signatures) {
+        return edges.stream()
+                .filter(edge -> signatures.contains(edge.caller)
+                        && signatures.contains(edge.callee))
                 .map(CallEdgeInfo::callee)
                 .collect(java.util.stream.Collectors.toCollection(
                         Sets::newLinkedSet));
@@ -867,6 +1065,8 @@ public class PtaHeavyMethodProfiler {
         item.put("top_callers", topNeighbors(m.callerCounts));
         item.put("top_callees", topNeighbors(m.calleeCounts));
         putAvailableMetric(item, "param_pts_max", m.paramPtsMax);
+        putAvailableMetric(item, "return_taint_obj_count",
+                m.returnTaintObjCount());
         putAvailableMetric(item, "return_pts_size", m.returnPtsSize());
         putAvailableMetric(item, "local_pts_max", m.localPtsMax);
         putAvailableMetric(item, "method_pts_total", m.methodPtsTotal);
@@ -900,6 +1100,7 @@ public class PtaHeavyMethodProfiler {
         Map<String, Object> availability = Maps.newLinkedHashMap();
         for (String metric : List.of(
                 "param_pts_max",
+                "return_taint_obj_count",
                 "return_pts_size",
                 "local_pts_max",
                 "method_pts_total",
@@ -1179,6 +1380,8 @@ public class PtaHeavyMethodProfiler {
         private final Set<String> arrayEdgeIds = Sets.newLinkedSet();
         private final Set<Obj> returnObjects =
                 Collections.newSetFromMap(new IdentityHashMap<>());
+        private final Set<Obj> returnTaintObjects =
+                Collections.newSetFromMap(new IdentityHashMap<>());
         private final Set<String> allocatedObjectConsumerPointers =
                 Sets.newLinkedSet();
         private boolean reachable;
@@ -1213,6 +1416,10 @@ public class PtaHeavyMethodProfiler {
 
         private int returnPtsSize() {
             return returnObjects.size();
+        }
+
+        private int returnTaintObjCount() {
+            return returnTaintObjects.size();
         }
 
         private int appReachableCallsiteCount() {

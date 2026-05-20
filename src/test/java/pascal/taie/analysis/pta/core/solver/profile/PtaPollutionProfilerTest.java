@@ -162,10 +162,12 @@ class PtaPollutionProfilerTest {
             Path metricsPath = Path.of(artifacts.get("pta_method_cg_pta_metrics"));
             Path mdPath = Path.of(artifacts.get("pta_heavy_polluting_methods_markdown"));
             Path cgPath = Path.of(artifacts.get("pta_heavy_method_callgraph"));
+            Path topPath = Path.of(artifacts.get("pta_top_polluting_methods"));
             assertTrue(Files.isRegularFile(profilePath));
             assertTrue(Files.isRegularFile(metricsPath));
             assertTrue(Files.isRegularFile(mdPath));
             assertTrue(Files.isRegularFile(cgPath));
+            assertTrue(Files.isRegularFile(topPath));
 
             JsonNode profile = JSON.readTree(profilePath.toFile());
             JsonNode methods = profile.get("methods");
@@ -189,43 +191,205 @@ class PtaPollutionProfilerTest {
             assertTrue(heavyMetrics.get("array_store_load_edge_count").asInt() >= 2);
             assertTrue(heavyMetrics.get("pfg_in_degree_sum").asInt() > 0);
             assertTrue(heavyMetrics.get("pfg_out_degree_sum").asInt() > 0);
+            assertEquals(0, heavyMetrics.get("return_taint_obj_count").asInt());
             assertFalse(heavyMetrics.get("receiver_state_effect").asBoolean());
             assertFalse(heavyMetrics.get("allocated_object_pts_fanout_metric_available").asBoolean());
             assertTrue(heavyMetrics.get("allocated_object_pts_fanout").isNull());
 
             JsonNode heavy = JSON.readTree(heavyPath.toFile());
-            JsonNode selected = findMethod(heavy.get("heavy_polluting_methods"),
-                    "<HeavyProfileApp: java.lang.Object heavy(java.lang.Object)>");
-            assertEquals(1, selected.get("rank").asInt());
-            assertEquals("app", selected.get("category").asText());
-            assertTrue(selected.get("score").asDouble() > 0.0);
-            assertTrue(selected.get("tf_proxy_score").asDouble() > 0.0);
-            assertEquals(1, selected.get("tf_proxy_rank").asInt());
-            assertFalse(selected.get("returns_array").asBoolean());
-            assertTrue(selected.get("returns_container_like").asBoolean());
-            assertTrue(selected.get("array_local_flow_shape").asBoolean());
-            assertTrue(selected.get("param_local_flow_shape").asBoolean());
-            assertFalse(selected.get("receiver_state_flow_shape").asBoolean());
-            assertTrue(hasReason(selected, "tf_proxy_reasons",
-                    "array_local_flow_shape"));
-            assertTrue(hasReason(selected, "tf_proxy_reasons",
-                    "param_local_flow_shape"));
-            assertTrue(hasReason(selected, "app_reachable_callsite_count >= p95"));
-            assertTrue(hasReason(selected, "return_pts_size >= p95"));
-            assertTrue(hasReason(selected, "field_array_edge_count >= p95"));
+            assertFalse(containsMethod(heavy.get("heavy_polluting_methods"),
+                    "<HeavyProfileApp: java.lang.Object heavy(java.lang.Object)>"));
 
             JsonNode cg = JSON.readTree(cgPath.toFile());
-            assertTrue(cg.get("heavy_method_edge_count").asInt() > 0);
-            assertTrue(containsEdge(cg.get("heavy_method_edges"),
-                    "<HeavyProfileApp: void main(java.lang.String[])>",
-                    "<HeavyProfileApp: java.lang.Object heavy(java.lang.Object)>"));
+            assertEquals(0, cg.get("heavy_method_edge_count").asInt());
             JsonNode topWithApp = cg.get("top_level_callers_with_app");
             JsonNode topWithoutApp = cg.get("top_level_callers_without_app");
-            assertTrue(containsMethod(topWithApp,
-                    "<HeavyProfileApp: void main(java.lang.String[])>"));
-            assertFalse(containsMethod(topWithoutApp,
+            assertFalse(containsMethod(topWithApp,
                     "<HeavyProfileApp: void main(java.lang.String[])>"));
             assertTrue(topWithoutApp.isArray());
+
+            JsonNode top = JSON.readTree(topPath.toFile());
+            assertEquals(0, top.get("top_method_count").asInt());
+        } finally {
+            World.reset();
+        }
+    }
+
+    @Test
+    void heavyMethodProfileIncludesTaintedReturnWrappers()
+            throws Exception {
+        Path testDir = Files.createTempDirectory(
+                Path.of("build/tmp").toAbsolutePath().normalize(),
+                "pta-heavy-method-taint-filter-");
+        Path classes = testDir.resolve("classes");
+        compileFixture(classes, "TaintHeavyProfileApp", """
+                public class TaintHeavyProfileApp {
+                    static Object sink;
+                    public static void main(String[] args) {
+                        Object taint = source();
+                        sink = caller0(taint);
+                        sink = caller1(taint);
+                        sink = caller2(taint);
+                        sink = caller3(taint);
+                        sink = caller4(taint);
+                        sink = caller5(taint);
+                        sink = tinyTaintedReturn(taint);
+                        sink = inflatedTaintedReturn(taint);
+                    }
+                    static Object source() {
+                        return new Object();
+                    }
+                    static Object caller0(Object input) {
+                        return sharedTaintedReturn(input);
+                    }
+                    static Object caller1(Object input) {
+                        return sharedTaintedReturn(input);
+                    }
+                    static Object caller2(Object input) {
+                        return sharedTaintedReturn(input);
+                    }
+                    static Object caller3(Object input) {
+                        return sharedTaintedReturn(input);
+                    }
+                    static Object caller4(Object input) {
+                        return sharedTaintedReturn(input);
+                    }
+                    static Object caller5(Object input) {
+                        return sharedTaintedReturn(input);
+                    }
+                    static Object sharedTaintedReturn(Object input) {
+                        return input;
+                    }
+                    static Object tinyTaintedReturn(Object input) {
+                        return input;
+                    }
+                    static Object inflatedTaintedReturn(Object input) {
+                        Object[] a0 = new Object[1];
+                        Object[] a1 = new Object[1];
+                        Object[] a2 = new Object[1];
+                        Object[] a3 = new Object[1];
+                        Object[] a4 = new Object[1];
+                        Object[] a5 = new Object[1];
+                        a0[0] = input;
+                        a1[0] = a0[0];
+                        a2[0] = a1[0];
+                        a3[0] = a2[0];
+                        a4[0] = a3[0];
+                        a5[0] = a4[0];
+                        return a5[0];
+                    }
+                }
+                """);
+        Path taintConfig = testDir.resolve("taint-config.yml");
+        Files.writeString(taintConfig, """
+                sources:
+                  - { kind: call, method: "<TaintHeavyProfileApp: java.lang.Object source()>", index: result }
+                sinks: []
+                """, StandardCharsets.UTF_8);
+        Path heavyPath = testDir.resolve("pta-heavy-polluting-methods.json");
+        try {
+            Main.main(
+                    "-pp",
+                    "-cp", classes.toString(),
+                    "-m", "TaintHeavyProfileApp",
+                    "--output-dir", testDir.resolve("output").toString(),
+                    "-a", "pta=implicit-entries:false;"
+                            + "only-app:false;"
+                            + "distinguish-string-constants:all;"
+                            + "cs:ci;"
+                            + "codesummary:codesummary;"
+                            + "jdk-analysis-mode:normal;"
+                            + "merge-string-objects:false;"
+                            + "merge-string-builders:false;"
+                            + "taint-config:" + taintConfig.toAbsolutePath()
+                            + ";pta-heavy-method-profile:"
+                            + heavyPath.toAbsolutePath() + ";");
+
+            JsonNode heavy = JSON.readTree(heavyPath.toFile());
+            JsonNode selected = findMethod(heavy.get("heavy_polluting_methods"),
+                    "<TaintHeavyProfileApp: java.lang.Object inflatedTaintedReturn(java.lang.Object)>");
+            assertTrue(selected.get("return_taint_obj_count").asInt() > 0);
+            assertTrue(hasReason(selected, "return_taint_obj_count > 0"));
+            assertTrue(hasReason(selected, "method_pts_total >= p95"));
+            JsonNode wrapper = findMethod(heavy.get("heavy_polluting_methods"),
+                    "<TaintHeavyProfileApp: java.lang.Object tinyTaintedReturn(java.lang.Object)>");
+            assertTrue(wrapper.get("return_taint_obj_count").asInt() > 0);
+            assertTrue(hasReason(wrapper, "return_taint_obj_count > 0"));
+            assertFalse(hasReason(wrapper, "method_pts_total >= p95"));
+            JsonNode shared = findMethod(heavy.get("heavy_polluting_methods"),
+                    "<TaintHeavyProfileApp: java.lang.Object sharedTaintedReturn(java.lang.Object)>");
+            assertTrue(shared.get("return_taint_obj_count").asInt() > 0);
+            assertTrue(shared.get("incoming_call_edge_count").asInt() >= 5);
+
+            Path topPath = testDir.resolve("pta-top-polluting-methods.json");
+            JsonNode top = JSON.readTree(topPath.toFile());
+            assertEquals(1, top.get("top_method_count").asInt());
+            assertTrue(containsMethod(top.get("top_polluting_methods"),
+                    "<TaintHeavyProfileApp: java.lang.Object sharedTaintedReturn(java.lang.Object)>"));
+            assertFalse(containsMethod(top.get("top_polluting_methods"),
+                    "<TaintHeavyProfileApp: java.lang.Object inflatedTaintedReturn(java.lang.Object)>"));
+            assertFalse(containsMethod(top.get("top_polluting_methods"),
+                    "<TaintHeavyProfileApp: java.lang.Object tinyTaintedReturn(java.lang.Object)>"));
+        } finally {
+            World.reset();
+        }
+    }
+
+    @Test
+    void heavyMethodProfileWorksWithoutCodeSummary()
+            throws Exception {
+        Path testDir = Files.createTempDirectory(
+                Path.of("build/tmp").toAbsolutePath().normalize(),
+                "pta-heavy-method-default-solver-");
+        Path classes = testDir.resolve("classes");
+        compileFixture(classes, "DefaultSolverTaintHeavyProfileApp", """
+                public class DefaultSolverTaintHeavyProfileApp {
+                    static Object sink;
+                    public static void main(String[] args) {
+                        Object taint = source();
+                        sink = sharedTaintedReturn(taint);
+                    }
+                    static Object source() {
+                        return new Object();
+                    }
+                    static Object sharedTaintedReturn(Object input) {
+                        return input;
+                    }
+                }
+                """);
+        Path taintConfig = testDir.resolve("taint-config.yml");
+        Files.writeString(taintConfig, """
+                sources:
+                  - { kind: call, method: "<DefaultSolverTaintHeavyProfileApp: java.lang.Object source()>", index: result }
+                sinks: []
+                """, StandardCharsets.UTF_8);
+        Path heavyPath = testDir.resolve("pta-heavy-polluting-methods.json");
+        try {
+            Main.main(
+                    "-pp",
+                    "-cp", classes.toString(),
+                    "-m", "DefaultSolverTaintHeavyProfileApp",
+                    "--output-dir", testDir.resolve("output").toString(),
+                    "-a", "pta=implicit-entries:false;"
+                            + "only-app:false;"
+                            + "distinguish-string-constants:all;"
+                            + "cs:ci;"
+                            + "codesummary:none;"
+                            + "merge-string-objects:false;"
+                            + "merge-string-builders:false;"
+                            + "taint-config:" + taintConfig.toAbsolutePath()
+                            + ";pta-heavy-method-profile:"
+                            + heavyPath.toAbsolutePath() + ";");
+
+            assertTrue(Files.isRegularFile(heavyPath));
+            JsonNode heavy = JSON.readTree(heavyPath.toFile());
+            assertEquals("none",
+                    heavy.get("options").get("codesummary").asText());
+            JsonNode selected = findMethod(heavy.get("heavy_polluting_methods"),
+                    "<DefaultSolverTaintHeavyProfileApp: java.lang.Object sharedTaintedReturn(java.lang.Object)>");
+            assertTrue(selected.get("return_taint_obj_count").asInt() > 0);
+            Path topPath = testDir.resolve("pta-top-polluting-methods.json");
+            assertTrue(Files.isRegularFile(topPath));
         } finally {
             World.reset();
         }
