@@ -54,6 +54,31 @@ class PtaSummaryFrontierProfilerTest {
     Path tempDir;
 
     @Test
+    void profilerIsDisabledByDefault() {
+        PtaSummaryFrontierProfiler profiler = new PtaSummaryFrontierProfiler(
+                new AnalysisOptions(Map.of(
+                        "cs", "ci",
+                        "only-app", false,
+                        "codesummary", "codesummary",
+                        "jdk-analysis-mode", "normal",
+                        "merge-string-objects", false,
+                        "merge-string-builders", false,
+                        "pta-summary-frontier-profile",
+                        tempDir.resolve("disabled-ranking.json").toString())),
+                new JdkBoundaryClassifier());
+        JMethod caller = method("com.acme.Controller", "handle", true);
+        JMethod frontier = method("java.lang.String", "split", false);
+
+        profiler.recordDirectFrontier(caller, frontier,
+                "com.acme.Controller.handle#12@L34", 34);
+
+        Map<String, String> artifacts = profiler.writeArtifacts();
+
+        assertTrue(artifacts.isEmpty());
+        assertFalse(tempDir.resolve("disabled-ranking.json").toFile().exists());
+    }
+
+    @Test
     void helperHubIsAttributedToAppUsedFrontierNotSelectedAsMethod()
             throws Exception {
         PtaSummaryFrontierProfiler profiler = new PtaSummaryFrontierProfiler(
@@ -155,17 +180,19 @@ class PtaSummaryFrontierProfilerTest {
     }
 
     private static AnalysisOptions options(Path rankingPath) {
-        return new AnalysisOptions(Map.of(
-                "cs", "ci",
-                "only-app", false,
-                "codesummary", "codesummary",
-                "jdk-analysis-mode", "normal",
-                "merge-string-objects", false,
-                "merge-string-builders", false,
-                "pta-summary-frontier-profile", rankingPath.toString(),
-                "pta-summary-frontier-target-recall", 1.0,
-                "pta-summary-frontier-max-slice-depth", 8,
-                "pta-summary-frontier-origin-cap", 2));
+        return new AnalysisOptions(Map.ofEntries(
+                Map.entry("cs", "ci"),
+                Map.entry("only-app", false),
+                Map.entry("codesummary", "codesummary"),
+                Map.entry("jdk-analysis-mode", "normal"),
+                Map.entry("merge-string-objects", false),
+                Map.entry("merge-string-builders", false),
+                Map.entry("pta-summary-frontier-profile-enabled", true),
+                Map.entry("pta-summary-frontier-profile",
+                        rankingPath.toString()),
+                Map.entry("pta-summary-frontier-target-recall", 1.0),
+                Map.entry("pta-summary-frontier-max-slice-depth", 8),
+                Map.entry("pta-summary-frontier-origin-cap", 2)));
     }
 
     private static AppOrigin origin(JMethod appMethod, String callsite,

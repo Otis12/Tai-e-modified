@@ -24,13 +24,21 @@
     # | app (distinguish string constants in application code)
     # | all (distinguish all string constants)
     # | <predicate-class-name>
-    merge-string-objects: false
-    merge-string-builders: false
+    merge-string-objects: true
+    merge-string-builders: true
     merge-exception-objects: true
     summary-container-map: true
     summary-container-list: true
     summary-container-collection: true
     summary-container-iterator: true
+    summary-app-accessor: true
+    summary-jdk-transfer: true
+    summary-jdk-utility: true
+    summary-jdk-catalog: true
+    summary-jdk-catalog-include-substrings: []
+    summary-jdk-catalog-exclude-substrings: []
+    summary-transfer-pfg-edges: false
+    summary-non-query-reapply: true
     handle-invokedynamic: false
     propagate-types: [ reference ] # ,null,int,long,...(other primitive types)
     advanced: null # specify advanced analysis:

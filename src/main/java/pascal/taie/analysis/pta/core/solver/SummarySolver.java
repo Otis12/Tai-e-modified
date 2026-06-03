@@ -251,6 +251,8 @@ public class SummarySolver implements Solver {
 
     private final boolean summaryGlobalReapplyFallback;
 
+    private final boolean summaryNonQueryReapply;
+
     private long queryApplySummaryNanos;
 
     private long queryReapplyNanos;
@@ -288,6 +290,8 @@ public class SummarySolver implements Solver {
         timeLimit = options.getInt("time-limit");
         summaryGlobalReapplyFallback = options.has("summary-global-reapply-fallback")
                 && options.getBoolean("summary-global-reapply-fallback");
+        summaryNonQueryReapply = !options.has("summary-non-query-reapply")
+                || options.getBoolean("summary-non-query-reapply");
     }
 
     @Override
@@ -483,7 +487,9 @@ public class SummarySolver implements Solver {
                 summaryManager.reapplyRegisteredQuerySummaries();
                 queryReapplyNanos += System.nanoTime() - queryReapplyStart;
 
-                summaryManager.reapplyRegisteredNonQuerySummaries();
+                if (summaryNonQueryReapply) {
+                    summaryManager.reapplyRegisteredNonQuerySummaries();
+                }
 
                 if (summaryGlobalReapplyFallback) {
                     long fallbackStart = System.nanoTime();

@@ -86,6 +86,8 @@ public class PtaPollutionProfiler {
 
     private final AnalysisOptions options;
 
+    private final boolean enabled;
+
     private final JdkBoundaryClassifier categoryClassifier =
             new JdkBoundaryClassifier();
 
@@ -105,11 +107,22 @@ public class PtaPollutionProfiler {
     public PtaPollutionProfiler(AnalysisOptions options,
                                 JdkBoundaryClassifier classifier) {
         this.options = options;
+        this.enabled = optionConfigured("pta-profile-output")
+                || optionConfigured("pta-boundary-baseline")
+                || optionConfigured("pta-boundary-selected")
+                || optionConfigured("pta-boundary-full-summary");
         Objects.requireNonNull(classifier, "classifier");
+    }
+
+    public boolean isEnabled() {
+        return enabled;
     }
 
     public void recordReachableMethod(JMethod method, boolean bodyProcessed,
                                       String ignoredReason) {
+        if (!enabled || method == null) {
+            return;
+        }
         MethodStats methodStats = method(method);
         ClassStats classStats = clazz(method);
         methodStats.reachable = true;
@@ -127,6 +140,9 @@ public class PtaPollutionProfiler {
     }
 
     public void recordAllocation(JMethod method, Obj obj) {
+        if (!enabled || method == null || obj == null) {
+            return;
+        }
         MethodStats methodStats = method(method);
         methodStats.allocatedObjectCount++;
         clazz(method).allocatedObjectCount++;
@@ -136,6 +152,9 @@ public class PtaPollutionProfiler {
                                int receiverPtsSize,
                                int argPtsTotal,
                                boolean hasResult) {
+        if (!enabled || edge == null || edge.getCallee() == null) {
+            return;
+        }
         JMethod callee = edge.getCallee().getMethod();
         MethodStats methodStats = method(callee);
         ClassStats classStats = clazz(callee);
@@ -159,6 +178,9 @@ public class PtaPollutionProfiler {
     }
 
     public void recordPFGEdge(PointerFlowEdge edge) {
+        if (!enabled || edge == null) {
+            return;
+        }
         String edgeKey = edge.kind() + "|" + edge.source() + "|" + edge.target();
         if (!seenPfgEdges.add(edgeKey)) {
             return;
@@ -169,7 +191,7 @@ public class PtaPollutionProfiler {
     }
 
     public void recordPropagate(Pointer pointer, PointsToSet diff) {
-        if (diff.isEmpty()) {
+        if (!enabled || pointer == null || diff == null || diff.isEmpty()) {
             return;
         }
         Owner owner = ownerOfPointer(pointer);
@@ -203,6 +225,9 @@ public class PtaPollutionProfiler {
     }
 
     public Map<String, String> writeArtifacts() {
+        if (!enabled) {
+            return Map.of();
+        }
         finishSharedEvidence();
         computeBoundaryDeltaScores();
         computeScores();
@@ -847,6 +872,11 @@ public class PtaPollutionProfiler {
         }
         Object value = options.get(key);
         return value == null ? null : String.valueOf(value);
+    }
+
+    private boolean optionConfigured(String key) {
+        String configured = optionString(key);
+        return configured != null && !configured.isBlank();
     }
 
     private Object optionValue(String key) {

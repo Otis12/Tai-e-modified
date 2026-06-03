@@ -28,8 +28,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pascal.taie.Main;
 import pascal.taie.World;
+import pascal.taie.analysis.graph.flowgraph.FlowKind;
 import pascal.taie.analysis.pta.PointerAnalysis;
 import pascal.taie.analysis.pta.PointerAnalysisResult;
+import pascal.taie.analysis.pta.core.cs.element.Pointer;
+import pascal.taie.analysis.pta.core.solver.PointerFlowEdge;
 import pascal.taie.analysis.pta.core.solver.SummarySolver;
 import pascal.taie.analysis.pta.core.solver.summary.JdkBoundaryClassifier;
 import pascal.taie.config.AnalysisOptions;
@@ -39,6 +42,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -50,6 +54,25 @@ class PtaPollutionProfilerTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void pollutionProfilerIsDisabledByDefault() {
+        PtaPollutionProfiler profiler = new PtaPollutionProfiler(
+                new AnalysisOptions(Map.of()), new JdkBoundaryClassifier());
+
+        Map<String, String> artifacts = profiler.writeArtifacts();
+
+        assertTrue(artifacts.isEmpty());
+        assertDoesNotThrow(() -> profiler.recordPFGEdge(new ExplodingEdge()));
+    }
+
+    @Test
+    void heavyMethodProfilerDoesNotInspectEdgesWhenDisabled() {
+        PtaHeavyMethodProfiler profiler = new PtaHeavyMethodProfiler(
+                new AnalysisOptions(Map.of()), new JdkBoundaryClassifier());
+
+        assertDoesNotThrow(() -> profiler.recordPFGEdge(new ExplodingEdge()));
+    }
 
     @Test
     void boundaryDeltaDoesNotTreatMissingSelectedProfileAsZero()
@@ -336,6 +359,174 @@ class PtaPollutionProfilerTest {
     }
 
     @Test
+    void topPollutingMethodsSelectSccEntryAndExposeMembers()
+            throws Exception {
+        Path testDir = Files.createTempDirectory(
+                Path.of("build/tmp").toAbsolutePath().normalize(),
+                "pta-heavy-method-scc-entry-");
+        Path classes = testDir.resolve("classes");
+        compileFixture(classes, "SccTopHeavyProfileApp", """
+                public class SccTopHeavyProfileApp {
+                    static Object sink;
+                    public static void main(String[] args) {
+                        Object taint = source();
+                        sink = entry0(taint);
+                        sink = entry1(taint);
+                        sink = entry2(taint);
+                        sink = entry3(taint);
+                        sink = entry4(taint);
+                    }
+                    static Object source() {
+                        return new Object();
+                    }
+                    static Object entry0(Object input) { return cycleEntry(input); }
+                    static Object entry1(Object input) { return cycleEntry(input); }
+                    static Object entry2(Object input) { return cycleEntry(input); }
+                    static Object entry3(Object input) { return cycleEntry(input); }
+                    static Object entry4(Object input) { return cycleEntry(input); }
+                    static Object cycleEntry(Object input) {
+                        Object r0 = cycleMember(input);
+                        Object r1 = cycleMember(r0);
+                        Object r2 = cycleMember(r1);
+                        Object r3 = cycleMember(r2);
+                        return cycleMember(r3);
+                    }
+                    static Object cycleMember(Object input) {
+                        if (input == null) {
+                            return cycleEntry(input);
+                        }
+                        return input;
+                    }
+                }
+                """);
+        Path taintConfig = testDir.resolve("taint-config.yml");
+        Files.writeString(taintConfig, """
+                sources:
+                  - { kind: call, method: "<SccTopHeavyProfileApp: java.lang.Object source()>", index: result }
+                sinks: []
+                """, StandardCharsets.UTF_8);
+        Path heavyPath = testDir.resolve("pta-heavy-polluting-methods.json");
+        try {
+            Main.main(
+                    "-pp",
+                    "-cp", classes.toString(),
+                    "-m", "SccTopHeavyProfileApp",
+                    "--output-dir", testDir.resolve("output").toString(),
+                    "-a", "pta=implicit-entries:false;"
+                            + "only-app:false;"
+                            + "distinguish-string-constants:all;"
+                            + "cs:ci;"
+                            + "codesummary:codesummary;"
+                            + "jdk-analysis-mode:normal;"
+                            + "merge-string-objects:false;"
+                            + "merge-string-builders:false;"
+                            + "taint-config:" + taintConfig.toAbsolutePath()
+                            + ";pta-heavy-method-profile:"
+                            + heavyPath.toAbsolutePath() + ";");
+
+            JsonNode top = JSON.readTree(
+                    testDir.resolve("pta-top-polluting-methods.json").toFile());
+            JsonNode selected = findMethod(top.get("top_polluting_methods"),
+                    "<SccTopHeavyProfileApp: java.lang.Object cycleEntry(java.lang.Object)>");
+            assertEquals("<SccTopHeavyProfileApp: java.lang.Object cycleEntry(java.lang.Object)>",
+                    selected.get("signature").asText());
+            assertEquals("app", selected.get("category").asText());
+            assertTrue(selected.get("scc_entry_selected").asBoolean());
+            assertTrue(containsMethod(selected.get("scc_members"),
+                    "<SccTopHeavyProfileApp: java.lang.Object cycleMember(java.lang.Object)>"));
+            assertTrue(selected.has("heavy_score"));
+            assertTrue(selected.has("downstream_heavy_count"));
+            assertTrue(selected.has("callers"));
+            assertTrue(selected.has("callees"));
+        } finally {
+            World.reset();
+        }
+    }
+
+    @Test
+    void topPollutingMethodsRecordSharedDownstreamHelpers()
+            throws Exception {
+        Path testDir = Files.createTempDirectory(
+                Path.of("build/tmp").toAbsolutePath().normalize(),
+                "pta-heavy-method-shared-helper-");
+        Path classes = testDir.resolve("classes");
+        compileFixture(classes, "SharedHelperTopHeavyProfileApp", """
+                public class SharedHelperTopHeavyProfileApp {
+                    static Object sink;
+                    public static void main(String[] args) {
+                        Object taint = source();
+                        sink = a0(taint);
+                        sink = a1(taint);
+                        sink = a2(taint);
+                        sink = a3(taint);
+                        sink = a4(taint);
+                        sink = b0(taint);
+                        sink = b1(taint);
+                        sink = b2(taint);
+                        sink = b3(taint);
+                        sink = b4(taint);
+                    }
+                    static Object source() { return new Object(); }
+                    static Object a0(Object input) { return topA(input); }
+                    static Object a1(Object input) { return topA(input); }
+                    static Object a2(Object input) { return topA(input); }
+                    static Object a3(Object input) { return topA(input); }
+                    static Object a4(Object input) { return topA(input); }
+                    static Object b0(Object input) { return topB(input); }
+                    static Object b1(Object input) { return topB(input); }
+                    static Object b2(Object input) { return topB(input); }
+                    static Object b3(Object input) { return topB(input); }
+                    static Object b4(Object input) { return topB(input); }
+                    static Object topA(Object input) { return sharedHelper(input); }
+                    static Object topB(Object input) { return sharedHelper(input); }
+                    static Object sharedHelper(Object input) { return input; }
+                }
+                """);
+        Path taintConfig = testDir.resolve("taint-config.yml");
+        Files.writeString(taintConfig, """
+                sources:
+                  - { kind: call, method: "<SharedHelperTopHeavyProfileApp: java.lang.Object source()>", index: result }
+                sinks: []
+                """, StandardCharsets.UTF_8);
+        Path heavyPath = testDir.resolve("pta-heavy-polluting-methods.json");
+        try {
+            Main.main(
+                    "-pp",
+                    "-cp", classes.toString(),
+                    "-m", "SharedHelperTopHeavyProfileApp",
+                    "--output-dir", testDir.resolve("output").toString(),
+                    "-a", "pta=implicit-entries:false;"
+                            + "only-app:false;"
+                            + "distinguish-string-constants:all;"
+                            + "cs:ci;"
+                            + "codesummary:codesummary;"
+                            + "jdk-analysis-mode:normal;"
+                            + "merge-string-objects:false;"
+                            + "merge-string-builders:false;"
+                            + "taint-config:" + taintConfig.toAbsolutePath()
+                            + ";pta-heavy-method-profile:"
+                            + heavyPath.toAbsolutePath() + ";");
+
+            JsonNode top = JSON.readTree(
+                    testDir.resolve("pta-top-polluting-methods.json").toFile());
+            JsonNode topA = findMethod(top.get("top_polluting_methods"),
+                    "<SharedHelperTopHeavyProfileApp: java.lang.Object topA(java.lang.Object)>");
+            JsonNode topB = findMethod(top.get("top_polluting_methods"),
+                    "<SharedHelperTopHeavyProfileApp: java.lang.Object topB(java.lang.Object)>");
+            String helper = "<SharedHelperTopHeavyProfileApp: java.lang.Object sharedHelper(java.lang.Object)>";
+            assertTrue(containsMethod(topA.get("downstream_heavy_method_details"), helper));
+            assertTrue(containsMethod(topB.get("downstream_heavy_method_details"), helper));
+            assertTrue(findMethod(topA.get("downstream_heavy_method_details"), helper)
+                    .get("shared").asBoolean());
+            assertTrue(findMethod(topB.get("downstream_heavy_method_details"), helper)
+                    .get("shared").asBoolean());
+            assertTrue(containsMethod(top.get("shared_downstream_heavy_methods"), helper));
+        } finally {
+            World.reset();
+        }
+    }
+
+    @Test
     void heavyMethodProfileWorksWithoutCodeSummary()
             throws Exception {
         Path testDir = Files.createTempDirectory(
@@ -504,5 +695,22 @@ class PtaPollutionProfilerTest {
             }
         }
         return false;
+    }
+
+    private static class ExplodingEdge extends PointerFlowEdge {
+
+        ExplodingEdge() {
+            super(FlowKind.LOCAL_ASSIGN, null, null);
+        }
+
+        @Override
+        public Pointer source() {
+            throw new AssertionError("disabled profiler inspected source");
+        }
+
+        @Override
+        public Pointer target() {
+            throw new AssertionError("disabled profiler inspected target");
+        }
     }
 }

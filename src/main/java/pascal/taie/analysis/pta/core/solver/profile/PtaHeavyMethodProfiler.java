@@ -106,6 +106,8 @@ public class PtaHeavyMethodProfiler {
 
     private final AnalysisOptions options;
 
+    private final boolean enabled;
+
     private final JdkBoundaryClassifier classifier;
 
     private final Map<String, MethodStats> methods = Maps.newLinkedHashMap();
@@ -129,17 +131,17 @@ public class PtaHeavyMethodProfiler {
     public PtaHeavyMethodProfiler(AnalysisOptions options,
                                   JdkBoundaryClassifier classifier) {
         this.options = options;
+        this.enabled = optionConfigured("pta-heavy-method-profile");
         this.classifier = Objects.requireNonNull(classifier, "classifier");
     }
 
     public boolean isEnabled() {
-        String configured = optionString("pta-heavy-method-profile");
-        return configured != null && !configured.isBlank();
+        return enabled;
     }
 
     public void recordReachableMethod(JMethod method, boolean bodyProcessed,
                                       String ignoredReason) {
-        if (method == null) {
+        if (!enabled || method == null) {
             return;
         }
         MethodStats stats = method(method);
@@ -154,7 +156,7 @@ public class PtaHeavyMethodProfiler {
     }
 
     public void recordAllocation(JMethod method, Obj obj) {
-        if (method == null || obj == null) {
+        if (!enabled || method == null || obj == null) {
             return;
         }
         MethodStats stats = method(method);
@@ -163,7 +165,7 @@ public class PtaHeavyMethodProfiler {
     }
 
     public void recordCallEdge(Edge<CSCallSite, CSMethod> edge) {
-        if (edge == null || edge.getCallee() == null
+        if (!enabled || edge == null || edge.getCallee() == null
                 || edge.getCallSite() == null) {
             return;
         }
@@ -193,7 +195,7 @@ public class PtaHeavyMethodProfiler {
     }
 
     public void recordPFGEdge(PointerFlowEdge edge) {
-        if (edge == null) {
+        if (!enabled || edge == null) {
             return;
         }
         String edgeKey = edge.kind() + "|" + edge.source() + "|"
@@ -220,7 +222,7 @@ public class PtaHeavyMethodProfiler {
     }
 
     public void recordPropagate(Pointer pointer, PointsToSet diff) {
-        if (pointer == null || diff == null || diff.isEmpty()) {
+        if (!enabled || pointer == null || diff == null || diff.isEmpty()) {
             return;
         }
         recordNestedTaintObjects(pointer, diff);
@@ -734,35 +736,35 @@ public class PtaHeavyMethodProfiler {
         Map<String, Set<String>> outgoing = heavyOutgoingMap(heavySignatures,
                 heavyEdges);
         List<HeavyMethod> anchorMethods = topAnchorMethods();
-        Set<String> anchorSignatures = anchorMethods.stream()
-                .map(method -> method.stats.signature)
-                .collect(java.util.stream.Collectors.toCollection(
-                        Sets::newLinkedSet));
-        Set<String> methodsWithAnchorCallers = methodsWithCallers(heavyEdges,
-                anchorSignatures);
-        List<HeavyMethod> topMethods = anchorMethods.stream()
-                .filter(method -> !methodsWithAnchorCallers.contains(
-                        method.stats.signature))
-                .toList();
+        List<TopSelection> topSelections = topSelections(anchorMethods,
+                heavyEdges);
         double totalHeavyScore = heavyMethods.stream()
                 .mapToDouble(method -> method.score)
                 .sum();
-        double coveredHeavyScore = coveredHeavyScore(topMethods, outgoing);
+        double coveredHeavyScore = coveredHeavyScore(topSelections, outgoing);
+        Map<String, Integer> coverageCounts = coverageCounts(topSelections,
+                outgoing);
+        Set<String> sharedDownstream = sharedDownstreamMethods(topSelections,
+                outgoing, coverageCounts);
 
         payload.put("heavy_method_count", heavyMethods.size());
         payload.put("top_anchor_min_incoming_call_edge_count",
                 TOP_ANCHOR_MIN_INCOMING_CALL_EDGES);
         payload.put("top_anchor_method_count", anchorMethods.size());
-        payload.put("top_method_count", topMethods.size());
+        payload.put("top_method_count", topSelections.size());
         payload.put("total_heavy_score", totalHeavyScore);
         payload.put("covered_heavy_score", coveredHeavyScore);
         payload.put("coverage_recall", totalHeavyScore <= 0.0
                 ? 0.0 : coveredHeavyScore / totalHeavyScore);
-        payload.put("top_polluting_methods", topMethods.stream()
-                .map(method -> topMethodMap(method, outgoing))
+        payload.put("shared_downstream_heavy_methods", sharedDownstream.stream()
+                .map(this::methodRef)
+                .toList());
+        payload.put("top_polluting_methods", topSelections.stream()
+                .map(selection -> topMethodMap(selection, outgoing,
+                        coverageCounts))
                 .toList());
         payload.put("uncovered_heavy_methods", uncoveredHeavyMethods(
-                topMethods, outgoing).stream()
+                topSelections, outgoing).stream()
                 .map(this::methodRef)
                 .toList());
         return payload;
@@ -773,6 +775,87 @@ public class PtaHeavyMethodProfiler {
                 .filter(method -> method.stats.incomingCallEdgeCount
                         >= TOP_ANCHOR_MIN_INCOMING_CALL_EDGES)
                 .toList();
+    }
+
+    private List<TopSelection> topSelections(List<HeavyMethod> anchorMethods,
+                                             List<CallEdgeInfo> heavyEdges) {
+        Set<String> anchorSignatures = anchorMethods.stream()
+                .map(method -> method.stats.signature)
+                .collect(java.util.stream.Collectors.toCollection(
+                        Sets::newLinkedSet));
+        List<CallEdgeInfo> anchorEdges = heavyEdges.stream()
+                .filter(edge -> anchorSignatures.contains(edge.caller)
+                        && anchorSignatures.contains(edge.callee))
+                .toList();
+        List<CallComponent> components = sourceComponents(anchorSignatures,
+                anchorEdges, false);
+        return components.stream()
+                .map(component -> topSelection(component, heavyEdges))
+                .filter(Objects::nonNull)
+                .sorted(Comparator
+                        .comparingInt((TopSelection selection) ->
+                                selection.method.rank)
+                        .thenComparing(selection ->
+                                selection.method.stats.signature))
+                .toList();
+    }
+
+    private TopSelection topSelection(CallComponent component,
+                                      List<CallEdgeInfo> heavyEdges) {
+        if (component.members.isEmpty()) {
+            return null;
+        }
+        Set<String> members = component.members.stream()
+                .collect(java.util.stream.Collectors.toCollection(
+                        Sets::newLinkedSet));
+        String selected = component.members.size() == 1
+                ? component.members.get(0)
+                : selectSccEntry(members, heavyEdges);
+        HeavyMethod method = heavyMethodBySignature(selected);
+        if (method == null) {
+            return null;
+        }
+        return new TopSelection(method, members, component.members.size() > 1);
+    }
+
+    private String selectSccEntry(Set<String> members,
+                                  List<CallEdgeInfo> heavyEdges) {
+        return members.stream()
+                .filter(member -> hasExternalDirectAppCaller(member, members,
+                        heavyEdges))
+                .max(Comparator
+                        .comparingInt((String member) ->
+                                externalDirectAppCallsiteCount(member,
+                                        members, heavyEdges))
+                        .thenComparing((String member) -> -rankOf(member))
+                        .thenComparing(Comparator.naturalOrder()))
+                .orElseGet(() -> members.stream()
+                        .min(Comparator
+                                .comparingInt((String member) ->
+                                        rankOf(member))
+                                .thenComparing(member -> member))
+                        .orElse(members.iterator().next()));
+    }
+
+    private boolean hasExternalDirectAppCaller(String member,
+                                               Set<String> componentMembers,
+                                               List<CallEdgeInfo> heavyEdges) {
+        return externalDirectAppCallsiteCount(member, componentMembers,
+                heavyEdges) > 0;
+    }
+
+    private int externalDirectAppCallsiteCount(String member,
+                                               Set<String> componentMembers,
+                                               List<CallEdgeInfo> heavyEdges) {
+        int count = 0;
+        for (CallEdgeInfo edge : heavyEdges) {
+            if (edge.callee.equals(member)
+                    && !componentMembers.contains(edge.caller)
+                    && isApp(edge.caller)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private Map<String, Set<String>> heavyOutgoingMap(Set<String> heavySignatures,
@@ -788,36 +871,55 @@ public class PtaHeavyMethodProfiler {
         return outgoing;
     }
 
-    private Map<String, Object> topMethodMap(HeavyMethod method,
-                                             Map<String, Set<String>> outgoing) {
+    private Map<String, Object> topMethodMap(TopSelection selection,
+                                             Map<String, Set<String>> outgoing,
+                                             Map<String, Integer> coverageCounts) {
+        HeavyMethod method = selection.method;
         Set<String> covered = reachableHeavyMethods(method.stats.signature,
                 outgoing);
+        Set<String> downstream = covered.stream()
+                .filter(signature -> !signature.equals(method.stats.signature))
+                .collect(java.util.stream.Collectors.toCollection(
+                        Sets::newLinkedSet));
         double coveredScore = covered.stream()
                 .map(this::heavyMethodBySignature)
                 .filter(Objects::nonNull)
                 .mapToDouble(heavy -> heavy.score)
                 .sum();
         Map<String, Object> item = method.toMap();
+        item.put("signature", method.stats.signature);
+        item.put("heavy_score", method.score);
         item.put("top_reason",
                 "incoming_call_edge_count >= "
                         + TOP_ANCHOR_MIN_INCOMING_CALL_EDGES
-                        + " and no incoming top-anchor caller");
+                        + (selection.sccEntrySelected
+                        ? " and selected as SCC entry"
+                        : " and no incoming top-anchor caller"));
         item.put("covered_heavy_method_count", covered.size());
         item.put("covered_heavy_score", coveredScore);
-        item.put("downstream_heavy_methods", covered.stream()
-                .filter(signature -> !signature.equals(method.stats.signature))
+        item.put("downstream_heavy_methods", List.copyOf(downstream));
+        item.put("downstream_heavy_count", downstream.size());
+        item.put("downstream_heavy_method_details", downstream.stream()
+                .map(signature -> methodRef(signature,
+                        coverageCounts.getOrDefault(signature, 0) > 1))
+                .toList());
+        item.put("scc_entry_selected", selection.sccEntrySelected);
+        item.put("scc_members", selection.sccMembers.stream()
                 .map(this::methodRef)
                 .toList());
-        item.put("scc_entry_selected", false);
+        item.put("shared",
+                coverageCounts.getOrDefault(method.stats.signature, 0) > 1);
+        item.put("callers", topNeighborsForPm6(method.stats.callerCounts));
+        item.put("callees", topNeighborsForPm6(method.stats.calleeCounts));
         item.put("ambiguous", false);
         return item;
     }
 
-    private double coveredHeavyScore(List<HeavyMethod> topMethods,
+    private double coveredHeavyScore(List<TopSelection> topSelections,
                                      Map<String, Set<String>> outgoing) {
-        return topMethods.stream()
-                .flatMap(method -> reachableHeavyMethods(method.stats.signature,
-                        outgoing).stream())
+        return topSelections.stream()
+                .flatMap(selection -> reachableHeavyMethods(
+                        selection.method.stats.signature, outgoing).stream())
                 .distinct()
                 .map(this::heavyMethodBySignature)
                 .filter(Objects::nonNull)
@@ -825,16 +927,49 @@ public class PtaHeavyMethodProfiler {
                 .sum();
     }
 
-    private Set<String> uncoveredHeavyMethods(List<HeavyMethod> topMethods,
+    private Set<String> uncoveredHeavyMethods(List<TopSelection> topSelections,
                                               Map<String, Set<String>> outgoing) {
         Set<String> covered = Sets.newLinkedSet();
-        topMethods.forEach(method -> covered.addAll(reachableHeavyMethods(
-                method.stats.signature, outgoing)));
+        topSelections.forEach(selection -> covered.addAll(
+                reachableHeavyMethods(selection.method.stats.signature,
+                        outgoing)));
         return heavyMethods.stream()
                 .map(method -> method.stats.signature)
                 .filter(signature -> !covered.contains(signature))
                 .collect(java.util.stream.Collectors.toCollection(
                         Sets::newLinkedSet));
+    }
+
+    private Map<String, Integer> coverageCounts(List<TopSelection> topSelections,
+                                                Map<String, Set<String>> outgoing) {
+        Map<String, Integer> counts = Maps.newLinkedHashMap();
+        for (TopSelection selection : topSelections) {
+            for (String covered : reachableHeavyMethods(
+                    selection.method.stats.signature, outgoing)) {
+                counts.merge(covered, 1, Integer::sum);
+            }
+        }
+        return counts;
+    }
+
+    private Set<String> sharedDownstreamMethods(List<TopSelection> topSelections,
+                                                Map<String, Set<String>> outgoing,
+                                                Map<String, Integer> coverageCounts) {
+        Set<String> topSignatures = topSelections.stream()
+                .map(selection -> selection.method.stats.signature)
+                .collect(java.util.stream.Collectors.toCollection(
+                        Sets::newLinkedSet));
+        Set<String> shared = Sets.newLinkedSet();
+        for (TopSelection selection : topSelections) {
+            for (String covered : reachableHeavyMethods(
+                    selection.method.stats.signature, outgoing)) {
+                if (!topSignatures.contains(covered)
+                        && coverageCounts.getOrDefault(covered, 0) > 1) {
+                    shared.add(covered);
+                }
+            }
+        }
+        return shared;
     }
 
     private Set<String> reachableHeavyMethods(String start,
@@ -1006,6 +1141,10 @@ public class PtaHeavyMethodProfiler {
     }
 
     private Map<String, Object> methodRef(String signature) {
+        return methodRef(signature, false);
+    }
+
+    private Map<String, Object> methodRef(String signature, boolean shared) {
         MethodStats stats = methods.get(signature);
         Map<String, Object> item = Maps.newLinkedHashMap();
         item.put("method_signature", signature);
@@ -1013,6 +1152,7 @@ public class PtaHeavyMethodProfiler {
         item.put("category", stats == null ? "unknown" : stats.category);
         item.put("rank", rankOf(signature) == Integer.MAX_VALUE
                 ? null : rankOf(signature));
+        item.put("shared", shared);
         return item;
     }
 
@@ -1139,6 +1279,27 @@ public class PtaHeavyMethodProfiler {
                     MethodStats method = methods.get(entry.getKey());
                     item.put("category", method == null
                             ? "unknown" : method.category);
+                    item.put("call_edge_count", entry.getValue());
+                    return item;
+                })
+                .toList();
+    }
+
+    private List<Map<String, Object>> topNeighborsForPm6(
+            Map<String, Integer> counts) {
+        return counts.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue()
+                        .reversed()
+                        .thenComparing(Map.Entry.comparingByKey()))
+                .limit(5)
+                .map(entry -> {
+                    Map<String, Object> item = Maps.newLinkedHashMap();
+                    item.put("signature", entry.getKey());
+                    item.put("method_signature", entry.getKey());
+                    MethodStats method = methods.get(entry.getKey());
+                    item.put("category", method == null
+                            ? "unknown" : method.category);
+                    item.put("callsite_count", entry.getValue());
                     item.put("call_edge_count", entry.getValue());
                     return item;
                 })
@@ -1322,6 +1483,11 @@ public class PtaHeavyMethodProfiler {
         return value == null ? null : String.valueOf(value);
     }
 
+    private boolean optionConfigured(String key) {
+        String configured = optionString(key);
+        return configured != null && !configured.isBlank();
+    }
+
     private Object optionValue(String key) {
         return options.has(key) ? options.get(key) : null;
     }
@@ -1489,6 +1655,20 @@ public class PtaHeavyMethodProfiler {
             item.put("pfg_degree_total", stats.pfgDegreeTotal());
             item.put("field_array_edge_count", stats.fieldArrayEdgeCount());
             return item;
+        }
+    }
+
+    private class TopSelection {
+
+        private final HeavyMethod method;
+        private final Set<String> sccMembers;
+        private final boolean sccEntrySelected;
+
+        private TopSelection(HeavyMethod method, Set<String> sccMembers,
+                             boolean sccEntrySelected) {
+            this.method = method;
+            this.sccMembers = Set.copyOf(sccMembers);
+            this.sccEntrySelected = sccEntrySelected;
         }
     }
 

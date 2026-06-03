@@ -98,6 +98,8 @@ public class PtaSummaryFrontierProfiler {
 
     private final JdkBoundaryClassifier classifier;
 
+    private final boolean enabled;
+
     private final Map<String, FrontierMethodStats> frontiers =
             Maps.newLinkedHashMap();
 
@@ -143,6 +145,8 @@ public class PtaSummaryFrontierProfiler {
                                       JdkBoundaryClassifier classifier) {
         this.options = options;
         this.classifier = Objects.requireNonNull(classifier, "classifier");
+        this.enabled = booleanOption("pta-summary-frontier-profile-enabled", false)
+                || booleanOption("pta-summary-frontier-enabled", false);
         this.originCap = intOption("pta-summary-frontier-origin-cap", 256);
         this.maxSliceDepth = intOption(
                 "pta-summary-frontier-max-slice-depth", 32);
@@ -152,6 +156,9 @@ public class PtaSummaryFrontierProfiler {
 
     public void recordReachableMethod(JMethod method, boolean bodyProcessed,
                                       String ignoredReason) {
+        if (!enabled) {
+            return;
+        }
         MethodInfo info = methodInfo(method);
         info.bodyProcessed = info.bodyProcessed || bodyProcessed;
         if (ignoredReason != null) {
@@ -167,6 +174,9 @@ public class PtaSummaryFrontierProfiler {
     }
 
     public void recordAllocation(JMethod method, Obj obj) {
+        if (!enabled) {
+            return;
+        }
         if (method == null || obj == null) {
             return;
         }
@@ -182,6 +192,9 @@ public class PtaSummaryFrontierProfiler {
     }
 
     public void recordCallEdge(Edge<CSCallSite, CSMethod> edge) {
+        if (!enabled) {
+            return;
+        }
         if (edge == null || edge.getCallee() == null) {
             return;
         }
@@ -205,6 +218,9 @@ public class PtaSummaryFrontierProfiler {
 
     public void recordDirectFrontier(JMethod caller, JMethod callee,
                                      String callsiteId, int lineNumber) {
+        if (!enabled) {
+            return;
+        }
         if (caller == null || callee == null || caller.isApplication()
                 == callee.isApplication()) {
             return;
@@ -224,6 +240,9 @@ public class PtaSummaryFrontierProfiler {
 
     public void recordNonAppCall(JMethod caller, JMethod callee,
                                  String kind, boolean ambiguous) {
+        if (!enabled) {
+            return;
+        }
         if (caller == null || callee == null
                 || caller.isApplication() || callee.isApplication()) {
             return;
@@ -245,6 +264,9 @@ public class PtaSummaryFrontierProfiler {
     public void recordCallArgumentOrigin(Edge<CSCallSite, CSMethod> edge,
                                          Pointer arg,
                                          Pointer param) {
+        if (!enabled) {
+            return;
+        }
         if (edge == null || arg == null || param == null) {
             return;
         }
@@ -271,6 +293,9 @@ public class PtaSummaryFrontierProfiler {
 
     public void recordReceiverOrigin(Invoke callSite, JMethod callee,
                                      Pointer receiver, Pointer calleeThis) {
+        if (!enabled) {
+            return;
+        }
         if (callSite == null || callee == null
                 || receiver == null || calleeThis == null) {
             return;
@@ -295,6 +320,9 @@ public class PtaSummaryFrontierProfiler {
     public void recordReturnOrigin(Edge<CSCallSite, CSMethod> edge,
                                    Pointer ret,
                                    Pointer lhs) {
+        if (!enabled) {
+            return;
+        }
         if (edge == null || ret == null || lhs == null) {
             return;
         }
@@ -315,6 +343,9 @@ public class PtaSummaryFrontierProfiler {
     }
 
     public void recordPFGEdge(PointerFlowEdge edge) {
+        if (!enabled) {
+            return;
+        }
         if (edge == null) {
             return;
         }
@@ -330,6 +361,9 @@ public class PtaSummaryFrontierProfiler {
     }
 
     public void recordPropagate(Pointer pointer, PointsToSet diff) {
+        if (!enabled) {
+            return;
+        }
         if (pointer == null || diff == null || diff.isEmpty()) {
             return;
         }
@@ -367,6 +401,9 @@ public class PtaSummaryFrontierProfiler {
             int pfgOutDegree,
             Set<String> edgeKinds,
             List<AppOrigin> origins) {
+        if (!enabled) {
+            return;
+        }
         MethodInfo methodInfo = methodInfo(ownerMethod);
         HubStats hub = new HubStats(hubId, pointerKind,
                 new Owner(methodInfo.className, methodInfo.signature,
@@ -383,6 +420,9 @@ public class PtaSummaryFrontierProfiler {
     }
 
     public Map<String, String> writeArtifacts() {
+        if (!enabled) {
+            return Map.of();
+        }
         buildSlices();
         classifyHubs();
         attributeHubs();
@@ -1127,6 +1167,20 @@ public class PtaSummaryFrontierProfiler {
             return defaultValue;
         }
         return Double.parseDouble(String.valueOf(value));
+    }
+
+    private boolean booleanOption(String key, boolean defaultValue) {
+        if (!options.has(key)) {
+            return defaultValue;
+        }
+        Object value = options.get(key);
+        if (value instanceof Boolean b) {
+            return b;
+        }
+        if (value == null || String.valueOf(value).isBlank()) {
+            return defaultValue;
+        }
+        return Boolean.parseBoolean(String.valueOf(value));
     }
 
     private String optionString(String key) {

@@ -12,6 +12,7 @@ package pascal.taie.analysis.pta.core.solver.summary;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import pascal.taie.analysis.graph.callgraph.CallGraphs;
+import pascal.taie.analysis.graph.flowgraph.FlowKind;
 import pascal.taie.analysis.pta.core.cs.CSCallGraph;
 import pascal.taie.analysis.pta.core.cs.context.Context;
 import pascal.taie.analysis.pta.core.cs.element.*;
@@ -130,6 +131,7 @@ public class SummaryManager {
     private final boolean enableListContainerSummaries;
     private final boolean enableCollectionContainerSummaries;
     private final boolean enableIteratorContainerSummaries;
+    private final boolean enableTransferPfgEdges;
     private final ContainerSummaryStore containerSummaryStore;
     private final CriteriaSummaryStore criteriaSummaryStore;
     private final QuerySummaryStore querySummaryStore;
@@ -150,6 +152,9 @@ public class SummaryManager {
     private long queryReadCount;
     private long queryAttachCount;
     private long summaryAppliedCount;
+    private long summaryPfgEdgeRequestCount;
+    private long summaryNoopFastPathCount;
+    private long summarySnapshotApplyCount;
     private long legacyCriteriaFallbackCount;
     private long globalReapplyFallbackCount;
     private JdkSummaryCatalogStats jdkSummaryCatalogStats =
@@ -219,6 +224,8 @@ public class SummaryManager {
                 resolveBooleanOption("summary-container-collection", true);
         this.enableIteratorContainerSummaries =
                 resolveBooleanOption("summary-container-iterator", true);
+        this.enableTransferPfgEdges =
+                resolveBooleanOption("summary-transfer-pfg-edges", false);
         this.containerSummaryStore = new ContainerSummaryStore(solver::makePointsToSet);
         this.criteriaSummaryStore = new CriteriaSummaryStore(solver::makePointsToSet);
         this.querySummaryStore = new QuerySummaryStore(solver::makePointsToSet);
@@ -269,44 +276,64 @@ public class SummaryManager {
         int registeredGetterSummaries = 0;
         int registeredSetterSummaries = 0;
 
-        for (JClass clazz : hierarchy.allClasses().toList()) {
-            if (clazz.isApplication()) {  // Only analyze application classes
-                for (JMethod method : clazz.getDeclaredMethods()) {
-                    if (method.isAbstract() || method.isNative()) {
-                        continue;
-                    }
+        boolean enableAppAccessorSummaries =
+                resolveBooleanOption("summary-app-accessor", true);
+        if (enableAppAccessorSummaries) {
+            for (JClass clazz : hierarchy.allClasses().toList()) {
+                if (clazz.isApplication()) {  // Only analyze application classes
+                    for (JMethod method : clazz.getDeclaredMethods()) {
+                        if (method.isAbstract() || method.isNative()) {
+                            continue;
+                        }
 
-                    String methodType = checkGSetterMethod(method);
-                    SummaryDetail accessorSummary = buildAccessorSummary(method, methodType);
-                    if (accessorSummary != null) {
-                        summaries.add(accessorSummary);
-                        logger.info("Registered hardcoded summary: {}", method.getSignature());
-                        if ("Getter".equals(methodType)) {
-                            registeredGetterSummaries++;
-                        } else if ("Setter".equals(methodType)) {
-                            registeredSetterSummaries++;
+                        String methodType = checkGSetterMethod(method);
+                        SummaryDetail accessorSummary = buildAccessorSummary(method, methodType);
+                        if (accessorSummary != null) {
+                            summaries.add(accessorSummary);
+                            logger.info("Registered hardcoded summary: {}", method.getSignature());
+                            if ("Getter".equals(methodType)) {
+                                registeredGetterSummaries++;
+                            } else if ("Setter".equals(methodType)) {
+                                registeredSetterSummaries++;
+                            }
                         }
                     }
                 }
             }
+        } else {
+            logger.info("Application getter/setter summaries disabled by summary-app-accessor=false");
         }
 
         logger.info("Registered {} application getter summaries and {} application setter summaries",
                 registeredGetterSummaries, registeredSetterSummaries);
 
-        addJdkUtilitySummaries(hierarchy, parser, summaries);
-        JdkSummaryCatalog jdkCatalog = loadJdkSummaryCatalog();
-        summaries.addAll(jdkCatalog.summaryConfig().summaryDetails());
-        jdkSummaryCatalogStats = jdkCatalog.stats();
-        jdkNoOpSummaries = jdkCatalog.noops();
-        jdkSummaryCatalogMethodSignatures = jdkCatalog.summaryConfig()
-                .summaryDetails()
-                .stream()
-                .map(summary -> summary.method().getSignature())
-                .collect(Collectors.toUnmodifiableSet());
-        logger.info("Initialized {} JDK catalog transfer summary rules and {} no-op selectors",
-                jdkSummaryCatalogStats.summaryCount(),
-                jdkSummaryCatalogStats.noopCount());
+        boolean enableJdkTransferSummaries =
+                resolveBooleanOption("summary-jdk-transfer", true);
+        if (enableJdkTransferSummaries) {
+            if (resolveBooleanOption("summary-jdk-utility", true)) {
+                addJdkUtilitySummaries(hierarchy, parser, summaries);
+            } else {
+                logger.info("JDK utility summaries disabled by summary-jdk-utility=false");
+            }
+            if (resolveBooleanOption("summary-jdk-catalog", true)) {
+                JdkSummaryCatalog jdkCatalog = loadJdkSummaryCatalog();
+                summaries.addAll(jdkCatalog.summaryConfig().summaryDetails());
+                jdkSummaryCatalogStats = jdkCatalog.stats();
+                jdkNoOpSummaries = jdkCatalog.noops();
+                jdkSummaryCatalogMethodSignatures = jdkCatalog.summaryConfig()
+                        .summaryDetails()
+                        .stream()
+                        .map(summary -> summary.method().getSignature())
+                        .collect(Collectors.toUnmodifiableSet());
+                logger.info("Initialized {} JDK catalog transfer summary rules and {} no-op selectors",
+                        jdkSummaryCatalogStats.summaryCount(),
+                        jdkSummaryCatalogStats.noopCount());
+            } else {
+                logger.info("JDK catalog summaries disabled by summary-jdk-catalog=false");
+            }
+        } else {
+            logger.info("JDK transfer summaries disabled by summary-jdk-transfer=false");
+        }
 
         if (!summaries.isEmpty()) {
             SummaryConfig hardcodedConfig = new SummaryConfig(summaries);
@@ -579,6 +606,13 @@ public class SummaryManager {
         AccessPath source = summary.source();
         AccessPath target = summary.target();
 
+        if (enableTransferPfgEdges
+                && source.isSimpleVar()
+                && target.isSimpleVar()) {
+            applySimpleTransferSummaryAsPfgEdge(context, callSite, source, target);
+            return;
+        }
+
         // 注册活跃调用点（用于增量更新）
 //        registerActiveCall(csCallSite, context, summary, callSite);
 
@@ -590,6 +624,7 @@ public class SummaryManager {
         if (sourcePts == null || sourcePts.isEmpty()) {
             return;
         }
+        summarySnapshotApplyCount++;
 
         TaintProvenanceDebug.logSummary(callSite, summary.method(),
                 "transfer", summary, sourcePts);
@@ -598,6 +633,23 @@ public class SummaryManager {
         propagateToTarget(callSite, context, target, sourcePts);
 
 
+    }
+
+    private void applySimpleTransferSummaryAsPfgEdge(Context context, Invoke callSite,
+                                                     AccessPath source, AccessPath target) {
+        Var sourceVar = getVarByIndex(callSite, source.base());
+        Var targetVar = getVarByIndex(callSite, target.base());
+        if (sourceVar == null || targetVar == null) {
+            return;
+        }
+        if (sourceVar.equals(targetVar)) {
+            summaryNoopFastPathCount++;
+            return;
+        }
+        CSVar sourcePointer = csManager.getCSVar(context, sourceVar);
+        CSVar targetPointer = csManager.getCSVar(context, targetVar);
+        solver.addPFGEdge(sourcePointer, targetPointer, FlowKind.ID);
+        summaryPfgEdgeRequestCount++;
     }
 
     private void applyContainerSummary(Context context, Invoke callSite,
@@ -2127,11 +2179,42 @@ public class SummaryManager {
     }
 
     private JdkSummaryCatalog loadJdkSummaryCatalog() {
-        return new JdkSummaryCatalogLoader(
+        JdkSummaryCatalog catalog = new JdkSummaryCatalogLoader(
                 solver.getHierarchy(),
                 resolveStringOption("jdk-summary-profile", "auto"),
                 resolveStringOption("jdk-summary-missing-signature", "warn"),
                 resolveStringListOption("jdk-summary-configs")).load();
+        List<String> includes = resolveStringListOption(
+                "summary-jdk-catalog-include-substrings");
+        List<String> excludes = resolveStringListOption(
+                "summary-jdk-catalog-exclude-substrings");
+        if (includes.isEmpty() && excludes.isEmpty()) {
+            return catalog;
+        }
+        List<SummaryDetail> filtered = catalog.summaryConfig()
+                .summaryDetails()
+                .stream()
+                .filter(summary -> matchesCatalogFilter(
+                        summary.method().getSignature(), includes, excludes))
+                .toList();
+        logger.info("Filtered JDK catalog summaries from {} to {} "
+                        + "(include-substrings={}, exclude-substrings={})",
+                catalog.summaryConfig().summaryDetails().size(),
+                filtered.size(),
+                includes,
+                excludes);
+        return new JdkSummaryCatalog(
+                new SummaryConfig(filtered),
+                catalog.noops(),
+                catalog.stats());
+    }
+
+    private boolean matchesCatalogFilter(
+            String signature, List<String> includes, List<String> excludes) {
+        boolean included = includes.isEmpty()
+                || includes.stream().anyMatch(signature::contains);
+        boolean excluded = excludes.stream().anyMatch(signature::contains);
+        return included && !excluded;
     }
 
     private int addAttributeCarrierSummaries(pascal.taie.language.classes.ClassHierarchy hierarchy) {
@@ -2766,6 +2849,9 @@ public class SummaryManager {
                         "  - Tracked summary callsites: %d\n" +
                         "  - Query read sites: %d\n" +
                         "  - Summary applications: %d\n" +
+                        "  - Summary PFG edge requests: %d\n" +
+                        "  - Summary no-op fast paths: %d\n" +
+                        "  - Summary snapshot applies: %d\n" +
                         "  - Query writes / reads / attaches: %d / %d / %d\n" +
                         "  - Legacy criteria fallback count: %d\n" +
                         "  - Global reapply fallback count: %d",
@@ -2781,6 +2867,9 @@ public class SummaryManager {
                 trackedSummaryCallSites.size(),
                 trackedQueryReadSites.size(),
                 summaryAppliedCount,
+                summaryPfgEdgeRequestCount,
+                summaryNoopFastPathCount,
+                summarySnapshotApplyCount,
                 queryWriteCount,
                 queryReadCount,
                 queryAttachCount,
